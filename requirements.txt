@@ -1,0 +1,7 @@
+# OpenAI is used only by the optional provider adapter; the default demo is offline.
+# The remaining packages support development and validation of the prototype.
+mypy>=1.15
+openai>=2.0
+pytest>=8.3
+pytest-asyncio>=0.25
+ruff>=0.11

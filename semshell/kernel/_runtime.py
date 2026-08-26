@@ -1,0 +1,42 @@
+"""Mutable process-control records owned exclusively by the kernel."""
+
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+from semshell.kernel.events import ProcessEvent
+from semshell.kernel.process import (
+    ProcessContext,
+    ProcessError,
+    ProcessResult,
+    ProcessState,
+    WaitMode,
+)
+from semshell.software.program import ProcessProgram
+
+
+@dataclass(slots=True)
+class ProcessControlBlock:
+    """Mutable scheduling state that is never exposed to user-space code."""
+
+    context: ProcessContext
+    program: ProcessProgram
+    state: ProcessState
+    started_at: datetime
+    completion: asyncio.Future[ProcessResult]
+    mailbox: deque[ProcessEvent] = field(default_factory=deque)
+    child_pids: set[int] = field(default_factory=set)
+    waiting_for: frozenset[int] | None = None
+    wait_mode: WaitMode | None = None
+    result: ProcessResult | None = None
+    runner: asyncio.Task[None] | None = None
+    pending_error: ProcessError | None = None
+    private: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def pid(self) -> int:
+        return self.context.pid
