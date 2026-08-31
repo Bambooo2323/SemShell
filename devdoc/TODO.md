@@ -266,7 +266,22 @@ Completion criterion: one unchanged guest ProcessImage works against fake and
 local bridges, missing Authority prevents Host invocation, lexical escape is
 rejected in a trusted temporary tree, and cancellation cannot reactivate the caller.
 
-- [ ] Complete interactive CLI commands: `images`, `ps`, `tree`, `spawn`, `send`, `wait`, `cancel`, `inspect`, and `reap`.
+### Version 0.3: persistent local Control CLI
+
+- [x] Define the 0.3 boundary: a persistent local administration REPL, not an Operator Process or remote transport.
+- [x] Keep external `send` unavailable; Process IPC requires a running source Process and Human input requires a bound ConsoleBridge.
+- [x] Freeze sequential request handling, RequestId allocation, strict rendering, and orderly shutdown semantics.
+- [ ] Add the observational `ListProcesses` operation to the transport-neutral Control protocol.
+- [ ] Add strict parsing for `images`, `ps`, `tree`, `spawn`, `wait`, `cancel`, `inspect`, and `reap`.
+- [ ] Add deterministic JSON-compatible encoding for public Control reply values.
+- [ ] Implement `semshell control` as one persistent Kernel/Gateway/Session lifecycle.
+- [ ] Prove `spawn -> ps/inspect -> wait -> reap`, rejection recovery, and Control audit correlation with scripted input.
+- [ ] Update public documentation while preserving the Control/Console/Operator distinction.
+
+Completion criterion: one local CLI session operates one live runtime entirely
+through ControlGateway after bootstrap, every admitted command has one terminal
+reply and audit record, and the CLI cannot forge Process IPC provenance.
+
 - [ ] JSON Lines, socket, and other remote adapters with request correlation and backpressure.
 - [ ] Approval, memory, Python runner, test runner, file editor, network, and LLM worker guest software.
 - [ ] A richer repair-project demonstration with allow, deny, and cancellation paths.
