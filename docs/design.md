@@ -38,6 +38,13 @@ The Kernel recognizes only generic execution concepts:
 - Capability Catalog discovery;
 - Principal and Authority.
 
+The next proof adds generic Host resource bindings without teaching the Kernel
+about filesystems. A Process returns `InvokeResource(binding_id, operation,
+input)`; the Kernel authenticates the caller, checks the binding's trusted
+operation-to-Permission map, and delegates to a passive bridge. The unchanged
+workspace-reader guest works with both an in-memory bridge and a local
+read-only bridge.
+
 ## Image, specification, and execution
 
 ```text
@@ -74,8 +81,8 @@ Multi-step behavior is retained in program-private state and progresses through
 later Events. For example, Spawn produces a later `ChildrenCompleted` Event;
 the next handler activation can then return Exit.
 
-Actions include spawn, send, wait, cancel, detach, discovery, yield, exit, and
-fail. Continuations arrive as Events. This makes scheduling, ownership,
+Actions include spawn, send, wait, cancel, detach, discovery, resource
+invocation, yield, exit, and fail. Continuations arrive as Events. This makes scheduling, ownership,
 cancellation, and audit behavior explicit rather than hiding them inside an
 Agent loop.
 
@@ -132,6 +139,12 @@ Host CLI
 The CLI does not make the Operator decision and does not route the demo through
 ControlGateway. A future interactive frontend may attach a console bridge to an
 already admitted HumanShell and deliver subsequent `ConsoleInput` Events.
+
+Resource bindings are fixed when a Kernel is constructed. Binding IDs are
+opaque identities and exact Authority scopes; guests cannot discover Host
+paths or supply their own PID, Principal, Authority, or invocation ID. Bridge
+results return through ordinary continuation Events, while cancellation
+permanently suppresses late delivery.
 
 ## Non-goals for version 0.1
 

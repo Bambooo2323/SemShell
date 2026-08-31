@@ -9,6 +9,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from semshell.resources.types import ResourceInvocationId
 from semshell.security.authority import Authority
 from semshell.security.principal import Principal
 
@@ -144,6 +145,7 @@ class ProcessSnapshot:
     waiting_for: tuple[int, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
     result: ProcessResult | None = None
+    pending_resource_invocation_id: ResourceInvocationId | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "child_pids", tuple(self.child_pids))

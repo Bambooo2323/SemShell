@@ -16,7 +16,20 @@ from semshell.kernel.process import (
     ProcessState,
     WaitMode,
 )
+from semshell.resources.types import ResourceInvocation, ResourceInvocationId
+from semshell.security.authority import Permission
 from semshell.software.program import ProcessProgram
+
+
+@dataclass(slots=True)
+class ResourceTaskRecord:
+    """Kernel-owned lifetime record for one live Host bridge task."""
+
+    invocation: ResourceInvocation
+    required_permission: Permission
+    task: asyncio.Task[None] | None = None
+    suppressed: bool = False
+    slot_released: bool = False
 
 
 @dataclass(slots=True)
@@ -35,6 +48,7 @@ class ProcessControlBlock:
     result: ProcessResult | None = None
     runner: asyncio.Task[None] | None = None
     pending_error: ProcessError | None = None
+    pending_resource_invocation_id: ResourceInvocationId | None = None
     private: dict[str, Any] = field(default_factory=dict)
 
     @property

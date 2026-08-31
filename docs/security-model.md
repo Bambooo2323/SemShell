@@ -58,6 +58,19 @@ Mediation alone is not containment. Until Process execution is isolated, a
 trusted in-process program can bypass a bridge and access APIs available to the
 runtime interpreter.
 
+The minimal resource proof implements this mediation boundary for read-only
+workspace text. The Host fixes bindings at Kernel construction. The Kernel
+derives invocation identity and caller context, enforces the binding-scoped
+Permission before Host code runs, bounds concurrent bridge tasks, normalizes
+public failures, and emits payload-free audit phases.
+
+The local bridge accepts only a strict portable relative-path grammar, bounds
+result bytes, resolves existing paths below its configured root, and performs
+no writes. This blocks lexical traversal and pre-existing escaping links in a
+trusted temporary tree. It is not a race-resistant filesystem sandbox:
+concurrent adversarial link or junction mutation is explicitly outside the
+proof.
+
 ## Control boundary
 
 External Control sessions have no SemShell PID and cannot claim a Process

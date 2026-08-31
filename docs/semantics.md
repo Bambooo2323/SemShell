@@ -1,7 +1,8 @@
-# SemShell 0.1 Semantics
+# SemShell Core and Resource-Bridge Semantics
 
-This document is the public normative summary for version 0.1. Implementations
-may add diagnostics but must preserve these rules.
+This document is the public normative summary for the version 0.1 core and the
+minimal resource-bridge extension. Implementations may add diagnostics but
+must preserve these rules.
 
 ## Core entities
 
@@ -25,6 +26,45 @@ terminal, and reaped Processes are never activated.
 
 Program exceptions become structured failed ProcessResults. Every admitted
 Process publishes exactly one terminal result.
+
+A resource continuation is inserted ahead of ordinary messages that queued
+while the Process was waiting for that invocation. Those messages do not wake
+the Process before the resource decision.
+
+## Host resource invocation
+
+The Host constructs an immutable ResourceRegistry before Kernel startup. A
+binding pairs an opaque binding ID, factory-free metadata, a trusted mapping
+from operation name to exact Permission, and a passive bridge. Guest code
+cannot register, replace, unregister, or resolve bindings by descriptive data.
+
+Every syntactically valid `InvokeResource` receives a monotonic Kernel-allocated
+invocation ID, including immediate rejections. The Kernel derives caller PID,
+Principal, and the Authority snapshot from the active Process record and
+deep-freezes the JSON-like input. These authenticated fields are not Action
+fields.
+
+The Kernel rejects unknown bindings, unsupported operations, missing exact
+Authority, malformed input, and exhausted bridge capacity before calling Host
+bridge code. One Process may have at most one outstanding invocation. A
+successful admission puts it in WAITING until exactly one
+`ResourceCompleted` or `ResourceRejected` continuation wins.
+
+Cancellation clears the pending continuation, records cancellation, and makes
+bridge task cancellation advisory. A late bridge result cannot reactivate the
+Process or expose its payload. Capacity remains occupied until the bridge task
+actually settles.
+
+Resource audit is append-only and metadata-only. It records identity,
+operation, phase, required Permission, and stable error code, but never input,
+Host paths, content, result payloads, bridge objects, or raw exceptions.
+
+The minimal `read_text` contract accepts a portable relative path with `/`
+separators and ASCII `[A-Za-z0-9._-]+` segments. Absolute paths, backslashes,
+colons, empty, `.`, and `..` segments are invalid. Results are bounded UTF-8
+text. The local proof also resolves an existing candidate below a fixed root;
+it assumes a trusted temporary tree without concurrent adversarial symlink or
+junction mutation.
 
 ## Ownership and waiting
 

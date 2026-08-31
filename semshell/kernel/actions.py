@@ -13,6 +13,7 @@ from semshell.kernel.operations import (
     SpawnProcesses,
 )
 from semshell.kernel.process import ProcessError, WaitMode
+from semshell.resources.types import ResourceBindingId
 
 Send = SendMessage
 Cancel = CancelProcess
@@ -54,6 +55,19 @@ class DiscoverImages:
 
 
 @dataclass(frozen=True, slots=True)
+class InvokeResource:
+    """Invoke one explicitly bound Host resource as the current Process."""
+
+    binding_id: ResourceBindingId
+    operation: str
+    input: Any = None
+
+    def __post_init__(self) -> None:
+        if not self.operation:
+            raise ValueError("resource operation must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
 class Exit:
     """Attempt to commit successful process completion."""
 
@@ -68,5 +82,14 @@ class Fail:
 
 
 ProcessAction: TypeAlias = (
-    Send | Spawn | Cancel | Detach | Wait | DiscoverImages | Yield | Exit | Fail
+    Send
+    | Spawn
+    | Cancel
+    | Detach
+    | Wait
+    | DiscoverImages
+    | InvokeResource
+    | Yield
+    | Exit
+    | Fail
 )

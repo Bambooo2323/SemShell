@@ -8,13 +8,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from semshell.kernel._runtime import ProcessControlBlock
+from semshell.kernel._runtime import ProcessControlBlock, ResourceTaskRecord
 from semshell.kernel.actions import (
     Cancel,
     Detach,
     DiscoverImages,
     Exit,
     Fail,
+    InvokeResource,
     ProcessAction,
     Send,
     Spawn,
@@ -38,6 +39,8 @@ from semshell.kernel.events import (
     MessageReceived,
     OperationCompleted,
     OperationRejected,
+    ResourceCompleted,
+    ResourceRejected,
     Spawned,
     Started,
 )
@@ -54,8 +57,19 @@ from semshell.kernel.process import (
     ProcessState,
     WaitMode,
 )
+from semshell.resources.bridge import HostResourceBridge, ResourceBridgeError
+from semshell.resources.registry import ResourceRegistry
+from semshell.resources.types import (
+    ResourceAuditEvent,
+    ResourceAuditPhase,
+    ResourceBindingDescriptor,
+    ResourceErrorCode,
+    ResourceInvocation,
+    ResourceInvocationId,
+    freeze_resource_value,
+)
 from semshell.security.audit import AuthorityDecisionRecord
-from semshell.security.authority import Authority
+from semshell.security.authority import Authority, Permission
 from semshell.security.policy import (
     AdmissionDecision,
     AdmissionRequest,
@@ -87,8 +101,10 @@ class ProcessKernel:
         max_processes: int = 1000,
         cancellation_timeout: float = 1.0,
         policy: Policy | None = None,
+        resources: ResourceRegistry | None = None,
+        max_resource_invocations: int = 4,
     ) -> None:
-        if max_running < 1 or max_processes < 1:
+        if max_running < 1 or max_processes < 1 or max_resource_invocations < 1:
             raise ValueError("process limits must be positive")
         if cancellation_timeout <= 0:
             raise ValueError("cancellation_timeout must be positive")
@@ -97,6 +113,8 @@ class ProcessKernel:
         self.max_processes = max_processes
         self.cancellation_timeout = cancellation_timeout
         self.policy = policy or DefaultPolicy()
+        self.resources = resources or ResourceRegistry()
+        self.max_resource_invocations = max_resource_invocations
         self._state = KernelState.STOPPED
         self._lifecycle_lock = asyncio.Lock()
         self._decision_lock = asyncio.Lock()
@@ -108,6 +126,10 @@ class ProcessKernel:
         self._draining_tasks: set[asyncio.Task[Any]] = set()
         self._running_count = 0
         self._authority_audit: list[AuthorityDecisionRecord] = []
+        self._next_resource_invocation_id = 1
+        self._resource_tasks: dict[ResourceInvocationId, ResourceTaskRecord] = {}
+        self._resource_in_flight = 0
+        self._resource_audit: list[ResourceAuditEvent] = []
         self.peak_running = 0
 
     @property
@@ -132,6 +154,22 @@ class ProcessKernel:
         """Return immutable authority decisions in evaluation order."""
 
         return tuple(self._authority_audit)
+
+    @property
+    def resource_invocation_count(self) -> int:
+        """Return the number of bridge tasks whose capacity slot is live."""
+
+        return self._resource_in_flight
+
+    def resource_audit_events(self) -> tuple[ResourceAuditEvent, ...]:
+        """Return immutable resource audit phases in append order."""
+
+        return tuple(self._resource_audit)
+
+    def list_resource_bindings(self) -> tuple[ResourceBindingDescriptor, ...]:
+        """Return startup-fixed Host resource descriptors for diagnostics."""
+
+        return self.resources.descriptors()
 
     async def start(self) -> None:
         async with self._lifecycle_lock:
@@ -264,7 +302,11 @@ class ProcessKernel:
                 f"process {target.pid} cannot accept external input"
             )
         target.mailbox.append(ConsoleInput(principal, payload))
-        if target.state is ProcessState.WAITING and target.waiting_for is None:
+        if (
+            target.state is ProcessState.WAITING
+            and target.waiting_for is None
+            and target.pending_resource_invocation_id is None
+        ):
             target.state = ProcessState.READY
             self._schedule(target)
 
@@ -310,6 +352,7 @@ class ProcessKernel:
                 for item in selected:
                     if item.state not in COMPLETION_STATES | {ProcessState.CANCELLING}:
                         item.state = ProcessState.CANCELLING
+                        self._suppress_pending_resource(item)
                         owned_cleanup.add(item.pid)
                 completion = pcb.completion
 
@@ -568,6 +611,8 @@ class ProcessKernel:
         elif isinstance(action, DiscoverImages):
             pcb.mailbox.append(ImagesDiscovered(self.list_images()))
             pcb.state = ProcessState.READY
+        elif isinstance(action, InvokeResource):
+            await self._apply_resource(pcb, action)
         elif isinstance(action, Wait):
             self._apply_wait(pcb, action)
         elif isinstance(action, Cancel):
@@ -585,6 +630,251 @@ class ProcessKernel:
             )
         else:
             await self._fail_abnormally(pcb, InvalidAction(type(action).__name__))
+
+    async def _apply_resource(
+        self, pcb: ProcessControlBlock, action: InvokeResource
+    ) -> None:
+        invocation_id = self._allocate_resource_invocation_id()
+        binding = self.resources.get(action.binding_id)
+        if binding is None:
+            self._reject_resource(
+                pcb, invocation_id, action, ResourceErrorCode.UNKNOWN_BINDING
+            )
+            return
+        required_permission = binding.descriptor.operations.get(action.operation)
+        if required_permission is None:
+            self._reject_resource(
+                pcb, invocation_id, action, ResourceErrorCode.UNSUPPORTED_OPERATION
+            )
+            return
+        if required_permission not in pcb.context.authority.permissions:
+            self._reject_resource(
+                pcb,
+                invocation_id,
+                action,
+                ResourceErrorCode.AUTHORITY_DENIED,
+                required_permission,
+            )
+            return
+        try:
+            frozen_input = freeze_resource_value(action.input)
+        except (TypeError, ValueError):
+            self._reject_resource(
+                pcb,
+                invocation_id,
+                action,
+                ResourceErrorCode.MALFORMED_INPUT,
+                required_permission,
+            )
+            return
+
+        async with self._decision_lock:
+            if pcb.state is not ProcessState.RUNNING:
+                return
+            if self._resource_in_flight >= self.max_resource_invocations:
+                self._reject_resource(
+                    pcb,
+                    invocation_id,
+                    action,
+                    ResourceErrorCode.CAPACITY_EXCEEDED,
+                    required_permission,
+                )
+                return
+            invocation = ResourceInvocation(
+                invocation_id=invocation_id,
+                binding_id=action.binding_id,
+                operation=action.operation,
+                caller_pid=pcb.pid,
+                principal=pcb.context.principal,
+                authority=pcb.context.authority,
+                input=frozen_input,
+            )
+            record = ResourceTaskRecord(invocation, required_permission)
+            self._resource_tasks[invocation_id] = record
+            self._resource_in_flight += 1
+            pcb.pending_resource_invocation_id = invocation_id
+            pcb.state = ProcessState.WAITING
+            self._audit_resource(
+                invocation,
+                ResourceAuditPhase.ADMITTED,
+                required_permission=required_permission,
+            )
+            task = asyncio.create_task(
+                self._run_resource(record, binding.bridge)
+            )
+            record.task = task
+
+    async def _run_resource(
+        self, record: ResourceTaskRecord, bridge: HostResourceBridge
+    ) -> None:
+        try:
+            value = await bridge.invoke(record.invocation)
+        except asyncio.CancelledError:
+            await self._settle_resource(
+                record, error_code=ResourceErrorCode.CANCELLED
+            )
+        except ResourceBridgeError as exc:
+            await self._settle_resource(record, error_code=exc.code)
+        except Exception:  # noqa: BLE001
+            await self._settle_resource(
+                record, error_code=ResourceErrorCode.BRIDGE_FAILURE
+            )
+        else:
+            await self._settle_resource(record, value=value)
+
+    async def _settle_resource(
+        self,
+        record: ResourceTaskRecord,
+        *,
+        value: Any = None,
+        error_code: ResourceErrorCode | None = None,
+    ) -> None:
+        invocation = record.invocation
+        should_schedule = False
+        async with self._decision_lock:
+            pcb = self._processes.get(invocation.caller_pid)
+            eligible = (
+                not record.suppressed
+                and pcb is not None
+                and pcb.state is ProcessState.WAITING
+                and pcb.pending_resource_invocation_id == invocation.invocation_id
+            )
+            self._release_resource_slot(record)
+            if eligible:
+                assert pcb is not None
+                pcb.pending_resource_invocation_id = None
+                if error_code is None:
+                    pcb.mailbox.appendleft(
+                        ResourceCompleted(
+                            invocation.invocation_id,
+                            invocation.binding_id,
+                            invocation.operation,
+                            value,
+                        )
+                    )
+                    phase = ResourceAuditPhase.COMPLETED
+                else:
+                    pcb.mailbox.appendleft(
+                        ResourceRejected(
+                            invocation.invocation_id,
+                            invocation.binding_id,
+                            invocation.operation,
+                            self._resource_error(error_code),
+                        )
+                    )
+                    phase = ResourceAuditPhase.FAILED
+                pcb.state = ProcessState.READY
+                should_schedule = True
+            else:
+                phase = (
+                    ResourceAuditPhase.LATE_COMPLETED
+                    if error_code is None
+                    else ResourceAuditPhase.LATE_FAILED
+                )
+            self._audit_resource(
+                invocation,
+                phase,
+                required_permission=record.required_permission,
+                error_code=error_code,
+            )
+        if should_schedule:
+            assert pcb is not None
+            self._schedule(pcb)
+
+    def _reject_resource(
+        self,
+        pcb: ProcessControlBlock,
+        invocation_id: ResourceInvocationId,
+        action: InvokeResource,
+        error_code: ResourceErrorCode,
+        required_permission: Permission | None = None,
+    ) -> None:
+        pcb.mailbox.appendleft(
+            ResourceRejected(
+                invocation_id,
+                action.binding_id,
+                action.operation,
+                self._resource_error(error_code),
+            )
+        )
+        pcb.state = ProcessState.READY
+        self._resource_audit.append(
+            ResourceAuditEvent(
+                occurred_at=datetime.now(UTC),
+                invocation_id=invocation_id,
+                caller_pid=pcb.pid,
+                principal=pcb.context.principal,
+                binding_id=action.binding_id,
+                operation=action.operation,
+                phase=ResourceAuditPhase.REJECTED,
+                required_permission=required_permission,
+                error_code=error_code,
+            )
+        )
+
+    def _allocate_resource_invocation_id(self) -> ResourceInvocationId:
+        invocation_id = ResourceInvocationId(self._next_resource_invocation_id)
+        self._next_resource_invocation_id += 1
+        return invocation_id
+
+    def _release_resource_slot(self, record: ResourceTaskRecord) -> None:
+        if record.slot_released:
+            return
+        record.slot_released = True
+        self._resource_tasks.pop(record.invocation.invocation_id, None)
+        self._resource_in_flight -= 1
+        if self._resource_in_flight < 0:
+            raise InvalidKernelState("resource capacity accounting underflow")
+
+    def _audit_resource(
+        self,
+        invocation: ResourceInvocation,
+        phase: ResourceAuditPhase,
+        *,
+        required_permission: Permission | None = None,
+        error_code: ResourceErrorCode | None = None,
+    ) -> None:
+        self._resource_audit.append(
+            ResourceAuditEvent(
+                occurred_at=datetime.now(UTC),
+                invocation_id=invocation.invocation_id,
+                caller_pid=invocation.caller_pid,
+                principal=invocation.principal,
+                binding_id=invocation.binding_id,
+                operation=invocation.operation,
+                phase=phase,
+                required_permission=required_permission,
+                error_code=error_code,
+            )
+        )
+
+    @staticmethod
+    def _resource_error(code: ResourceErrorCode) -> ProcessError:
+        messages = {
+            ResourceErrorCode.UNKNOWN_BINDING: "resource binding is unknown",
+            ResourceErrorCode.UNSUPPORTED_OPERATION: "resource operation is unsupported",
+            ResourceErrorCode.AUTHORITY_DENIED: "resource authority was denied",
+            ResourceErrorCode.CAPACITY_EXCEEDED: "resource capacity exceeded",
+            ResourceErrorCode.MALFORMED_INPUT: "resource input is malformed",
+            ResourceErrorCode.NOT_FOUND: "resource was not found",
+            ResourceErrorCode.LIMIT_EXCEEDED: "resource limit exceeded",
+            ResourceErrorCode.BRIDGE_FAILURE: "resource bridge failed",
+            ResourceErrorCode.CANCELLED: "resource invocation was cancelled",
+        }
+        origin = (
+            ErrorOrigin.POLICY
+            if code is ResourceErrorCode.AUTHORITY_DENIED
+            else ErrorOrigin.HOST
+            if code
+            in {
+                ResourceErrorCode.MALFORMED_INPUT,
+                ResourceErrorCode.NOT_FOUND,
+                ResourceErrorCode.LIMIT_EXCEEDED,
+                ResourceErrorCode.BRIDGE_FAILURE,
+            }
+            else ErrorOrigin.KERNEL
+        )
+        return ProcessError(code=code.value, message=messages[code], origin=origin)
 
     async def _apply_spawn(self, pcb: ProcessControlBlock, action: Spawn) -> None:
         if action.wait and any(
@@ -708,7 +998,11 @@ class ProcessKernel:
         }:
             raise InvalidKernelState(f"process {target.pid} cannot accept messages")
         target.mailbox.append(MessageReceived(message))
-        if target.state is ProcessState.WAITING and target.waiting_for is None:
+        if (
+            target.state is ProcessState.WAITING
+            and target.waiting_for is None
+            and target.pending_resource_invocation_id is None
+        ):
             target.state = ProcessState.READY
             self._schedule(target)
 
@@ -793,6 +1087,24 @@ class ProcessKernel:
             ),
             diagnostics=diagnostics,
         )
+
+    def _suppress_pending_resource(self, pcb: ProcessControlBlock) -> None:
+        invocation_id = pcb.pending_resource_invocation_id
+        if invocation_id is None:
+            return
+        pcb.pending_resource_invocation_id = None
+        record = self._resource_tasks.get(invocation_id)
+        if record is None or record.suppressed:
+            return
+        record.suppressed = True
+        self._audit_resource(
+            record.invocation,
+            ResourceAuditPhase.CANCELLED,
+            required_permission=record.required_permission,
+            error_code=ResourceErrorCode.CANCELLED,
+        )
+        if record.task is not None and not record.task.done():
+            record.task.cancel()
 
     async def _wait_bounded(self, task: asyncio.Task[Any]) -> bool:
         done, _ = await asyncio.wait({task}, timeout=self.cancellation_timeout)
@@ -915,4 +1227,5 @@ class ProcessKernel:
             waiting_for=tuple(sorted(pcb.waiting_for or ())),
             metadata=pcb.context.metadata,
             result=pcb.result,
+            pending_resource_invocation_id=pcb.pending_resource_invocation_id,
         )

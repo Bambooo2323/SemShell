@@ -249,18 +249,18 @@ Completion criterion: release `0.1.0` only when code and documentation make the 
 
 ### Recommended next proof: generic Host resource bridge
 
-- [ ] Close startup-fixed ResourceBinding identity and Kernel-lifetime ownership semantics.
-- [ ] Define InvokeResource and ResourceCompleted/ResourceRejected with Kernel-allocated invocation IDs.
-- [ ] Define Kernel-authenticated ResourceInvocation context with no caller-supplied PID, Principal, or Authority.
-- [ ] Define an immutable binding-ID Authority scope and trusted operation-to-Permission mapping.
-- [ ] Define one outstanding invocation per Process and completion/cancellation linearization.
-- [ ] Define bounded input/result behavior and metadata-only audit records.
-- [ ] Implement Host-only descriptors, a startup registry, and a passive HostResourceBridge protocol.
-- [ ] Implement an in-memory `read_text` bridge and shared conformance tests.
-- [ ] Integrate generic resource Actions/Events without filesystem-specific Kernel branches.
-- [ ] Implement a matching local `read_text` bridge over trusted temporary roots only.
-- [ ] Add one workspace-reader ProcessImage and allowed/denied/lexical-escape proof.
-- [ ] Update public semantics and security documentation without claiming code containment.
+- [x] Close startup-fixed ResourceBinding identity and Kernel-lifetime ownership semantics.
+- [x] Define InvokeResource and ResourceCompleted/ResourceRejected with Kernel-allocated invocation IDs.
+- [x] Define Kernel-authenticated ResourceInvocation context with no caller-supplied PID, Principal, or Authority.
+- [x] Define an immutable binding-ID Authority scope and trusted operation-to-Permission mapping.
+- [x] Define one outstanding invocation per Process and completion/cancellation linearization.
+- [x] Define bounded input/result behavior and metadata-only audit records.
+- [x] Implement Host-only descriptors, a startup registry, and a passive HostResourceBridge protocol.
+- [x] Implement an in-memory `read_text` bridge and shared conformance tests.
+- [x] Integrate generic resource Actions/Events without filesystem-specific Kernel branches.
+- [x] Implement a matching local `read_text` bridge over trusted temporary roots only.
+- [x] Add one workspace-reader ProcessImage and allowed/denied/lexical-escape proof.
+- [x] Update public semantics and security documentation without claiming code containment.
 
 Completion criterion: one unchanged guest ProcessImage works against fake and
 local bridges, missing Authority prevents Host invocation, lexical escape is

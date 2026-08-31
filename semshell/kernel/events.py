@@ -10,6 +10,7 @@ from typing import Any, TypeAlias
 from uuid import uuid4
 
 from semshell.kernel.process import ProcessError, ProcessResult
+from semshell.resources.types import ResourceBindingId, ResourceInvocationId
 from semshell.security.principal import Principal
 from semshell.software.image import ProcessImageDescriptor
 
@@ -129,6 +130,34 @@ class ImagesDiscovered:
         object.__setattr__(self, "images", tuple(self.images))
 
 
+@dataclass(frozen=True, slots=True)
+class ResourceCompleted:
+    """Continuation for one successfully committed Host resource invocation."""
+
+    invocation_id: ResourceInvocationId
+    binding_id: ResourceBindingId
+    operation: str
+    value: Any
+
+    def __post_init__(self) -> None:
+        if not self.operation:
+            raise ValueError("resource operation must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceRejected:
+    """Continuation for one rejected or failed Host resource invocation."""
+
+    invocation_id: ResourceInvocationId
+    binding_id: ResourceBindingId
+    operation: str
+    error: ProcessError
+
+    def __post_init__(self) -> None:
+        if not self.operation:
+            raise ValueError("resource operation must not be empty")
+
+
 ProcessEvent: TypeAlias = (
     Started
     | MessageReceived
@@ -139,4 +168,6 @@ ProcessEvent: TypeAlias = (
     | ContinuationEvent
     | ConsoleInput
     | ImagesDiscovered
+    | ResourceCompleted
+    | ResourceRejected
 )
