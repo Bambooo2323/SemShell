@@ -1,14 +1,16 @@
-"""Minimal command-line entry point for the version 0.1 architecture proof."""
+"""Command-line entry points for architecture demos and local Control."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
+import sys
 from collections.abc import Sequence
 from typing import Any, cast
 
 from semshell import __version__
+from semshell.cli.control import run_local_control
 from semshell.examples import OperatorKind, run_demo
 
 
@@ -20,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     demo = commands.add_parser("demo", help="run the flattened Process proof")
     demo.add_argument("--operator", choices=("human", "rule", "llm"), required=True)
+    commands.add_parser("control", help="run the persistent local Control CLI")
     return parser
 
 
@@ -55,9 +58,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run one architecture demonstration and emit structured JSON."""
 
     arguments = build_parser().parse_args(argv)
-    operator = cast(OperatorKind, arguments.operator)
-    print(json.dumps(asyncio.run(_run(operator)), indent=2))
-    return 0
+    if arguments.command == "demo":
+        operator = cast(OperatorKind, arguments.operator)
+        print(json.dumps(asyncio.run(_run(operator)), indent=2))
+        return 0
+    try:
+        return asyncio.run(run_local_control(sys.stdin, sys.stdout, sys.stderr))
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":

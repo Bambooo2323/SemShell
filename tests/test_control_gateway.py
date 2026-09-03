@@ -25,6 +25,7 @@ from semshell.kernel import (
 from semshell.kernel.operations import (
     InspectProcess,
     ListImages,
+    ListProcesses,
     SpawnProcesses,
     WaitProcess,
 )
@@ -89,6 +90,28 @@ def request(request_id: str, operation: object) -> ControlRequest:
 
 
 @pytest.mark.asyncio
+async def test_list_processes_observes_public_deterministic_snapshots() -> None:
+    kernel = ProcessKernel(catalog())
+    await kernel.start()
+    gateway = ControlGateway(kernel)
+    session = gateway.open_session(
+        principal=Principal("test", "control"), authority=Authority.empty()
+    )
+
+    empty = await gateway.submit(session, request("empty", ListProcesses()))
+    assert (await empty.wait_reply()).value == ()
+    pids = await kernel.spawn_many(
+        (ProcessSpec(image="passive@1"), ProcessSpec(image="passive@1")),
+        principal=Principal("test", "bootstrap"),
+    )
+    populated = await gateway.submit(session, request("full", ListProcesses()))
+    snapshots = (await populated.wait_reply()).value
+
+    assert tuple(snapshot.pid for snapshot in snapshots) == pids
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
 async def test_interrupted_wait_does_not_cancel_target() -> None:
     kernel = ProcessKernel(catalog())
     await kernel.start()
@@ -144,6 +167,35 @@ async def test_interrupted_dispatched_spawn_is_not_rolled_back() -> None:
         AuditOutcome.INTERRUPTED,
         AuditOutcome.LATE_SUCCEEDED,
     ]
+    await gateway.close_session(session)
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_observation_does_not_wait_for_mutation_capacity() -> None:
+    kernel = DelayedSpawnKernel(catalog())
+    await kernel.start()
+    gateway = ControlGateway(kernel, max_mutations=1)
+    session = gateway.open_session(
+        principal=Principal.parse("human:test"), authority=Authority.empty()
+    )
+    spawning = await gateway.submit(
+        session,
+        request(
+            "spawn",
+            SpawnProcesses((ProcessSpec(image="exit@1", input="created"),)),
+        ),
+    )
+    await asyncio.wait_for(kernel.spawn_started.wait(), timeout=1)
+
+    observing = await gateway.submit(
+        session, request("observe", ListProcesses())
+    )
+    observation = await asyncio.wait_for(observing.wait_reply(), timeout=1)
+
+    assert observation.status is ReplyStatus.SUCCEEDED
+    kernel.release_spawn.set()
+    assert (await spawning.wait_reply()).status is ReplyStatus.SUCCEEDED
     await gateway.close_session(session)
     await kernel.stop()
 

@@ -86,15 +86,24 @@ root Principal and Authority, Operator Process, and console binding. Version
 0.1 does not define remote authentication or delegate this root-of-trust
 configuration to guest software.
 
-## Deferred containment
+The local Control CLI derives its Principal and Authority from trusted
+bootstrap configuration. Command text cannot replace that identity or enlarge
+the session Authority. It emits only explicitly encoded public values and
+fails closed on arbitrary Host objects instead of falling back to `repr()` or
+exception text.
 
-Future restricted subprocess, container, worker-daemon, or WASM executors may
-enforce the Host resource boundary. A first coarse step is to run the entire
-SemShell runtime inside one locked-down Docker container.
+## Production containment boundary
 
-Such backends must preserve Process identity, lifecycle, Event/Action,
-cancellation, and ProcessResult semantics. Execution isolation profiles must
-not introduce Kernel branches for LLM, tool, memory, or coordinator roles.
+This reference repository intentionally does not add subprocess, container,
+worker-daemon, or WASM executors. Enforced containment belongs to the separate
+production runtime described in
+[reference-and-production.md](reference-and-production.md).
+
+The initial production mapping uses one isolated container execution per
+logical SemShell Process. Any backend must preserve Process identity,
+lifecycle, Event/Action, cancellation, Authority, and ProcessResult semantics;
+execution profiles must not introduce role-specific branches for LLMs, tools,
+memory, or coordinators.
 
 ## Explicit non-goals
 

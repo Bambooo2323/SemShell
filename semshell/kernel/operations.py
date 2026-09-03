@@ -16,6 +16,11 @@ class ListImages:
 
 
 @dataclass(frozen=True, slots=True)
+class ListProcesses:
+    """Create a deterministic snapshot of the live Process Table."""
+
+
+@dataclass(frozen=True, slots=True)
 class ResolveImage:
     """Resolve exactly one image reference or semantic capability."""
 
@@ -153,6 +158,7 @@ class ReapProcess:
 
 KernelOperation: TypeAlias = (
     ListImages
+    | ListProcesses
     | ResolveImage
     | RegisterImage
     | UnregisterImage
@@ -171,6 +177,7 @@ KernelOperation: TypeAlias = (
 # bridge and is not a generic Control operation.
 ExternalControlOperation: TypeAlias = (
     ListImages
+    | ListProcesses
     | ResolveImage
     | UnregisterImage
     | SpawnProcesses
@@ -183,6 +190,7 @@ ExternalControlOperation: TypeAlias = (
 
 EXTERNAL_CONTROL_OPERATION_TYPES = (
     ListImages,
+    ListProcesses,
     ResolveImage,
     UnregisterImage,
     SpawnProcesses,

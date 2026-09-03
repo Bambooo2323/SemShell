@@ -4,6 +4,9 @@ SemShell is a small process-centric runtime for studying an LLM-operated CLI
 environment. It is an executable architecture argument, not a complete
 operating system or production Agent framework.
 
+The [reference/production split](reference-and-production.md) defines how this
+Python model relates to a separate Linux/OCI application implementation.
+
 ## Three claims
 
 Version 0.1 is built to demonstrate three claims:
@@ -140,13 +143,19 @@ The CLI does not make the Operator decision and does not route the demo through
 ControlGateway. A future interactive frontend may attach a console bridge to an
 already admitted HumanShell and deliver subsequent `ConsoleInput` Events.
 
+The version 0.3 `control` command is a separate session-lived local
+administration adapter. It keeps one Kernel, ControlGateway, and ControlSession
+alive for that CLI session and maps typed commands to ControlRequests. It is
+useful for inspecting and managing the runtime, but it is not a Process or an
+alternative Operator model.
+
 Resource bindings are fixed when a Kernel is constructed. Binding IDs are
 opaque identities and exact Authority scopes; guests cannot discover Host
 paths or supply their own PID, Principal, Authority, or invocation ID. Bridge
 results return through ordinary continuation Events, while cancellation
 permanently suppresses late delivery.
 
-## Non-goals for version 0.1
+## Non-goals for the reference repository
 
 - production CLI completeness;
 - general remote clients or frontend streaming;
@@ -156,4 +165,6 @@ permanently suppresses late delivery.
 - performance comparison with existing Agent frameworks.
 
 The project is primarily about engineering structure, explainability, and
-software management rather than execution speed.
+software management rather than execution speed. Production containment,
+durability, transports, and orchestration belong in the separate Linux/OCI
+runtime repository.

@@ -24,6 +24,7 @@ from semshell.kernel.operations import (
     InspectProcess,
     InspectTree,
     ListImages,
+    ListProcesses,
     ReapProcess,
     ResolveImage,
     SpawnProcesses,
@@ -182,6 +183,8 @@ class ControlGateway:
     async def _execute(self, session: ControlSession, operation: Any) -> Any:
         if isinstance(operation, ListImages):
             return self.kernel.list_images()
+        if isinstance(operation, ListProcesses):
+            return self.kernel.list_processes()
         if isinstance(operation, ResolveImage):
             return self.kernel.resolve_image(
                 image=operation.image,

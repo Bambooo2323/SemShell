@@ -271,72 +271,91 @@ rejected in a trusted temporary tree, and cancellation cannot reactivate the cal
 - [x] Define the 0.3 boundary: a persistent local administration REPL, not an Operator Process or remote transport.
 - [x] Keep external `send` unavailable; Process IPC requires a running source Process and Human input requires a bound ConsoleBridge.
 - [x] Freeze sequential request handling, RequestId allocation, strict rendering, and orderly shutdown semantics.
-- [ ] Add the observational `ListProcesses` operation to the transport-neutral Control protocol.
-- [ ] Add strict parsing for `images`, `ps`, `tree`, `spawn`, `wait`, `cancel`, `inspect`, and `reap`.
-- [ ] Add deterministic JSON-compatible encoding for public Control reply values.
-- [ ] Implement `semshell control` as one persistent Kernel/Gateway/Session lifecycle.
-- [ ] Prove `spawn -> ps/inspect -> wait -> reap`, rejection recovery, and Control audit correlation with scripted input.
-- [ ] Update public documentation while preserving the Control/Console/Operator distinction.
+- [x] Add the observational `ListProcesses` operation to the transport-neutral Control protocol.
+- [x] Add strict parsing for `images`, `ps`, `tree`, `spawn`, `wait`, `cancel`, `inspect`, and `reap`.
+- [x] Add deterministic JSON-compatible encoding for public Control reply values.
+- [x] Implement `semshell control` as one persistent Kernel/Gateway/Session lifecycle.
+- [x] Prove `spawn -> ps/inspect -> wait -> reap`, rejection recovery, interruption, shutdown, routing, and Control audit correlation with scripted input.
+- [x] Update public documentation while preserving the Control/Console/Operator distinction.
 
 Completion criterion: one local CLI session operates one live runtime entirely
 through ControlGateway after bootstrap, every admitted command has one terminal
 reply and audit record, and the CLI cannot forge Process IPC provenance.
 
-- [ ] JSON Lines, socket, and other remote adapters with request correlation and backpressure.
-- [ ] Approval, memory, Python runner, test runner, file editor, network, and LLM worker guest software.
-- [ ] A richer repair-project demonstration with allow, deny, and cancellation paths.
-- [ ] append-only event journal 和 replay。
-- [ ] Process checkpoint / resume。
-- [ ] subprocess/container executor。
-- [ ] Add a locked-down single-container runtime profile for coarse Host containment.
-- [ ] Define explicit workspace and network bridge configuration for container runs.
-- [ ] Add isolated Process execution profiles only after the shared executor contract is stable.
-- [ ] signal、streaming stdout/stderr 和 backpressure。
-- [ ] resource budget 与 accounting。
-- [ ] supervisor software 和 restart policy。
-- [ ] remote catalog / package manager。
-- [ ] multi-worker transport 和 lease-based process ownership。
-- [ ] OpenTelemetry adapter 和可视化 inspector。
-- [ ] 兼容 MCP、OpenAI Responses 或其他 Agent SDK 的 user-space adapter。
-- [ ] Add a transport-neutral, read-only virtual namespace over images, capabilities, processes, and sessions.
-- [ ] Prototype an optional Linux/libfuse3 adapter after the in-memory namespace contract is stable.
-- [ ] Consider writable request transaction nodes only after CLI/JSON semantics prove their behavior.
+## 13. Design repository scope freeze
 
-### Long-lived streams and frontend subscriptions
+This repository is now an executable reference design rather than the
+production runtime implementation.
 
-Implement this only after the 0.1 Process, Control, cancellation, authority, and
-end-to-end operator contracts are stable.
+- [x] Distinguish the Python reference state machine from a Linux/OCI runtime.
+- [x] Document which semantics stay owned by SemShell and which mechanisms are
+  delegated to Linux and a container runtime.
+- [x] Remove production runtime features from this repository's implementation
+  roadmap.
+- [x] Publish the complete 0.3 reference as the design version; do not create a
+  smaller presentation branch now.
+- [x] Freeze physical pruning. Require a recoverable tag/branch and an explicit
+  file-level removal list if that decision is revisited.
 
-- [ ] Define a provider-neutral stream protocol with `StreamId`, open, chunk, close, failure, and cancellation events.
-- [ ] Define producer ownership and the relationship between Process termination and stream termination.
-- [ ] Add bounded buffering, backpressure, chunk ordering, and slow-consumer policy.
-- [ ] Distinguish a stream's zero-or-more events from the exactly-one terminal `ControlReply` of its subscription request.
-- [ ] Define subscribe, unsubscribe, disconnect, reconnect cursor, and late-subscriber behavior.
-- [ ] Add an output journal only if replay or reconnect requires it; do not make durability implicit.
-- [ ] Implement transport-neutral fake stream tests before selecting a frontend transport.
-- [ ] Add optional SSE and/or WebSocket Control adapters for frontend consumers.
-- [ ] Bridge OpenAI Responses streaming events into the provider-neutral stream protocol without exposing OpenAI SDK types to the Kernel.
-- [ ] Reuse the same stream contract for LLM output, subprocess stdout/stderr, logs, file reads, and other incremental producers.
+The default policy is maintenance-only: fix contradictions, broken proofs, and
+documentation drift, but do not add production transports, persistence,
+executors, streams, supervisors, or deployment systems here.
 
-Completion criteria: a slow or disconnected frontend cannot cause unbounded
-mailbox/task growth, each stream reaches one stable terminal state, and enabling
-OpenAI streaming requires no model-specific branch in the Kernel.
+## 14. Next design deliverable
 
-## 推荐实施顺序
+The remaining work in this repository is specification, not Python runtime
+implementation:
 
-严格按以下关键路径推进：
+- [ ] Encode registration, Event, Action, and ProcessResult as versioned,
+  language-neutral wire schemas.
+- [ ] Encode logical Process, execution, container, and operating-system
+  identity fields and invariants.
+- [ ] Decide admission/create/persist/start crash-recovery ordering.
+- [ ] Decide structured worker-result versus conflicting runtime-exit
+  precedence.
+- [ ] Encode cancellation, late-message, channel-loss, and reconciliation
+  transition tables.
+- [ ] Specify versioned Authority-to-execution-profile compiler inputs,
+  outputs, enforcement failures, and audit fields.
+- [ ] Specify trusted resource-injection and credential-lifetime profiles.
+- [ ] Publish shared language-neutral conformance fixtures.
 
-```text
-Semantics
-  -> Public Types
-  -> Deterministic Kernel
-  -> Cancellation
-  -> Catalog
-  -> Authority
-  -> Operators
-  -> User-space Programs
-  -> End-to-end Demo
-  -> Documentation / 0.1.0
-```
+Completion criterion: a separate application repository can implement the
+contract with Docker Engine, containerd, or another OCI-compatible runtime
+without importing or replacing the Python ProcessKernel.
 
-不要先实现真实 LLM 接口。fake LLMShell 足以验证 Kernel contract；真实模型接入只有在 HumanShell 和 RuleShell 已证明同一接口可替换后才有意义。
+## 15. Separate production-runtime roadmap
+
+The following are intentionally not TODO items for this repository:
+
+- production JSON Lines, socket, HTTP, or frontend transports;
+- persistent journal, replay, checkpoint, and resume;
+- subprocess/container executors and Linux signal/cgroup integration;
+- production workspace, network, secret, model, and device injection;
+- streaming stdout/stderr, subscriptions, and backpressure;
+- supervisors, restart policy, resource accounting, and multi-worker leases;
+- durable state, authentication, audit storage, and telemetry;
+- remote Catalog/package management and deployment orchestration;
+- optional FUSE views or other operating-system adapters.
+
+These belong to the separate Linux/OCI application repository after the worker
+and execution-profile specifications close.
+
+## 16. Article and documentation handoff
+
+The writing brief is maintained in
+[`article_writing_plan.md`](article_writing_plan.md).
+
+- [x] Freeze the executable reference scope and its non-claims.
+- [x] Select the article thesis, audience, outline, terminology, and evidence
+  map.
+- [x] Separate repository-backed claims from comparisons requiring external
+  primary sources.
+- [ ] Collect primary sources for ecosystem, Codex, OCI, and adjacent-runtime
+  comparisons.
+- [ ] Draft the English article section by section.
+- [ ] Run context-free reader tests against the complete article.
+- [ ] Prepare the separate publication repository and copy only intentional
+  release artifacts.
+
+No additional Python feature is a prerequisite for beginning the article.

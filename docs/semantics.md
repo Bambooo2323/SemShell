@@ -135,6 +135,16 @@ Host Control is limited to administration, observation, bootstrap, and tests.
 Trusted Host bootstrap selects the initial Policy, Catalog, root Operator, and
 any console binding. Remote authentication is outside version 0.1.
 
+The local Control CLI maintains one session and allocates monotonically named
+RequestIds after successful command parsing. Each admitted command produces one
+terminal ControlReply and audit record. Parser failures are adapter outcomes,
+consume no RequestId, and have no Kernel effect. `ListProcesses` is a read-only
+external operation returning deterministic immutable Process snapshots.
+
+The CLI cannot submit `SendMessage`: a ControlSession has no PID from which
+authentic Process IPC could originate. Console input instead targets one
+previously bound shell Process, and Process-to-Process IPC remains an Action.
+
 ## Role neutrality
 
 The Kernel must not import, identify, or branch on HumanShell, RuleShell,
