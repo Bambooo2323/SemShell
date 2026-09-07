@@ -8,6 +8,7 @@ import pytest
 
 from semshell import CapabilitySpec, ProcessImage, ProcessImageDescriptor, ProcessSpec
 from semshell.control import ControlGateway, ControlRequest, ReplyStatus, RequestId
+from semshell.control.gateway import CONTROL_CATALOG_UNREGISTER
 from semshell.kernel import Exit, ProcessContext, ProcessKernel, Started
 from semshell.kernel.errors import OperationDenied
 from semshell.kernel.operations import ListImages, ResolveImage, UnregisterImage
@@ -136,7 +137,8 @@ async def test_control_catalog_results_are_factory_free_and_unload_is_safe() -> 
     await kernel.start()
     gateway = ControlGateway(kernel)
     session = gateway.open_session(
-        principal=Principal.parse("human:test"), authority=Authority.empty()
+        principal=Principal.parse("human:test"),
+        authority=Authority.of((CONTROL_CATALOG_UNREGISTER,)),
     )
 
     listed = await gateway.submit(session, control_request("list", ListImages()))

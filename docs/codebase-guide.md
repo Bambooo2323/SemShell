@@ -84,6 +84,10 @@ keeps one runtime alive across commands but does not bypass ControlGateway.
 | Event/Action ABI | admitted Process PID and context | ProcessAction from `handle()` | ProcessEvent or ProcessResult | normal guest execution |
 | Resource bridge | Kernel-authenticated Process invocation | InvokeResource Action | ResourceCompleted/Rejected Event | scoped Host facilities |
 | Control protocol | ControlSession Principal and Authority; no PID | ControlRequest | exactly one ControlReply | Host administration and observation |
+
+Mutating Control operations are individually authorized. The local reference
+session receives `control.process.cancel`, `control.process.reap`, and
+`control.catalog.unregister`; command payloads cannot add them.
 | CLI adapter | local terminal using one ControlSession | parsed typed Control operation | deterministic JSON | local Control interface |
 | ConsoleBridge | trusted Host binding fixed to one PID | principal-attributed input | ConsoleInput Event | input device for one shell Process |
 

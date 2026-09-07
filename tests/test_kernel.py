@@ -27,7 +27,8 @@ from semshell.kernel import (
     WaitMode,
     Yield,
 )
-from semshell.kernel.errors import InvalidKernelState
+from semshell.kernel.errors import InvalidKernelState, OperationDenied
+from semshell.kernel.kernel import KernelState
 from semshell.security import Principal
 from semshell.software.catalog import ProcessCatalog
 from semshell.software.image import CapabilitySpec, ProcessImage, ProcessSpec
@@ -36,6 +37,102 @@ from semshell.software.image import CapabilitySpec, ProcessImage, ProcessSpec
 class ProgramBase:
     async def stop(self, reason: str) -> None:
         return None
+
+
+@pytest.mark.asyncio
+async def test_batch_metadata_failure_leaves_no_process_or_consumed_pid(
+    catalog: ProcessCatalog, principal: Principal
+) -> None:
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    try:
+        with pytest.raises(TypeError):
+            await kernel.spawn_many(
+                (
+                    ProcessSpec(image="passive@1"),
+                    ProcessSpec(image="passive@1", metadata={"bad": object()}),
+                ),
+                principal=principal,
+            )
+        assert kernel.list_processes() == ()
+        assert await kernel.spawn(ProcessSpec(image="echo@1"), principal=principal) == 1
+    finally:
+        await kernel.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("image", ["echo@1", "failing@1", "passive@1"])
+async def test_terminal_parent_cannot_admit_children(
+    catalog: ProcessCatalog, principal: Principal, image: str
+) -> None:
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    try:
+        parent = await kernel.spawn(ProcessSpec(image=image), principal=principal)
+        if image == "passive@1":
+            await kernel.cancel(parent)
+        else:
+            await kernel.wait(parent, timeout=1)
+        with pytest.raises(OperationDenied):
+            await kernel.spawn(
+                ProcessSpec(image="passive@1"), principal=principal, parent_pid=parent
+            )
+        assert kernel.process_count == 1
+    finally:
+        await kernel.stop()
+    assert kernel.state is KernelState.STOPPED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nested", [False, True])
+async def test_stop_waits_for_failure_cleanup(
+    catalog: ProcessCatalog, principal: Principal, nested: bool
+) -> None:
+    cleaning = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingCleanup(PassiveProgram):
+        async def stop(self, reason: str) -> None:
+            cleaning.set()
+            await release.wait()
+
+    class FailingOwner(ProgramBase):
+        async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+            if isinstance(event, Started):
+                return Spawn((ProcessSpec(image="blocking-cleanup@1"),))
+            raise RuntimeError("owner failed")
+
+    catalog.register(ProcessImage("blocking-cleanup", "1", BlockingCleanup))
+    catalog.register(ProcessImage("failing-owner", "1", FailingOwner))
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    try:
+        parent = (
+            await kernel.spawn(ProcessSpec(image="passive@1"), principal=principal)
+            if nested else None
+        )
+        owner = await kernel.spawn(
+            ProcessSpec(image="failing-owner@1"), principal=principal, parent_pid=parent
+        )
+        await asyncio.wait_for(cleaning.wait(), timeout=1)
+        with pytest.raises(OperationDenied):
+            await kernel.spawn(
+                ProcessSpec(image="passive@1"), principal=principal, parent_pid=owner
+            )
+        stopping = asyncio.create_task(kernel.stop())
+        await asyncio.sleep(0)
+        assert not stopping.done()
+        release.set()
+        await asyncio.wait_for(stopping, timeout=1)
+        assert kernel.state is KernelState.STOPPED
+        assert (await kernel.wait(owner)).state is ProcessState.FAILED
+        assert all(
+            item.state in {ProcessState.FAILED, ProcessState.CANCELLED}
+            for item in kernel.list_processes()
+        )
+    finally:
+        release.set()
+        await kernel.stop()
 
 
 class EchoProgram(ProgramBase):
@@ -492,6 +589,109 @@ async def test_concurrent_cancel_requests_share_one_cleanup(
     assert first is second
     assert first.state is ProcessState.CANCELLED
     assert program.stop_count == 1
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_cleanup_survives_requester_cancellation(
+    catalog: ProcessCatalog, principal: Principal
+) -> None:
+    stop_started = asyncio.Event()
+    release_stop = asyncio.Event()
+
+    class BlockingStopProgram(PassiveProgram):
+        async def stop(self, reason: str) -> None:
+            stop_started.set()
+            await release_stop.wait()
+
+    class OwnerProgram(ProgramBase):
+        async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+            if isinstance(event, Started):
+                return Spawn((ProcessSpec(image="blocking-stop@1"),))
+            if isinstance(event, Spawned):
+                return Cancel(event.pids[0])
+            raise AssertionError(f"unexpected event: {event!r}")
+
+    catalog.register(ProcessImage("blocking-stop", "1", BlockingStopProgram))
+    catalog.register(ProcessImage("cancelling-owner", "1", OwnerProgram))
+    kernel = ProcessKernel(catalog, cancellation_timeout=0.2)
+    await kernel.start()
+    owner = await kernel.spawn(
+        ProcessSpec(image="cancelling-owner@1"), principal=principal
+    )
+    await asyncio.wait_for(stop_started.wait(), timeout=1)
+
+    owner_cancel = asyncio.create_task(
+        kernel.cancel(owner, mode=CancelMode.TREE, reason="cancel owner")
+    )
+    await asyncio.sleep(0)
+    release_stop.set()
+    result = await asyncio.wait_for(owner_cancel, timeout=1)
+
+    assert result.state is ProcessState.CANCELLED
+    assert all(
+        item.state is ProcessState.CANCELLED for item in kernel.tree(owner)
+    )
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_parent_failure_waits_for_concurrently_failing_child(
+    catalog: ProcessCatalog, principal: Principal
+) -> None:
+    child_started = asyncio.Event()
+    release = asyncio.Event()
+
+    class ConcurrentlyFailingChild(ProgramBase):
+        async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+            child_started.set()
+            await release.wait()
+            raise RuntimeError("child failed")
+
+    class ConcurrentlyFailingOwner(ProgramBase):
+        async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+            if isinstance(event, Started):
+                return Spawn((ProcessSpec(image="concurrent-failing-child@1"),))
+            if isinstance(event, Spawned):
+                await release.wait()
+                raise RuntimeError("owner failed")  # noqa: TRY004
+            raise AssertionError(f"unexpected event: {event!r}")
+
+    catalog.register(
+        ProcessImage("concurrent-failing-child", "1", ConcurrentlyFailingChild)
+    )
+    catalog.register(
+        ProcessImage("concurrent-failing-owner", "1", ConcurrentlyFailingOwner)
+    )
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    owner = await kernel.spawn(
+        ProcessSpec(image="concurrent-failing-owner@1"), principal=principal
+    )
+    await asyncio.wait_for(child_started.wait(), timeout=1)
+    release.set()
+
+    owner_result = await kernel.wait(owner, timeout=1)
+    child_result = await kernel.wait(kernel.tree(owner)[1].pid, timeout=1)
+    assert owner_result.state is ProcessState.FAILED
+    assert child_result.state is ProcessState.FAILED
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_published_result_is_recursively_immutable(
+    catalog: ProcessCatalog, principal: Principal
+) -> None:
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    pid = await kernel.spawn(
+        ProcessSpec(image="echo@1", input={"value": [1]}), principal=principal
+    )
+    result = await kernel.wait(pid, timeout=1)
+
+    with pytest.raises(AttributeError):
+        result.result["value"].append(2)
+    assert (await kernel.wait(pid)).result == {"value": (1,)}
     await kernel.stop()
 
 

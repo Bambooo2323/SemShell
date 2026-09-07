@@ -221,6 +221,11 @@ record and slot exactly once, appends
 `ResourceRejected(resource.bridge_failure)`, and returns the Process to
 `READY`. Bridge code has not run in this case.
 
+If an admitted task is cancelled before its coroutine executes its first step,
+the task completion callback re-enters the same settlement path. It releases
+the capacity slot exactly once and cannot deliver a continuation after Process
+cancellation.
+
 ## 7. Bridge outcome normalization
 
 The bridge either returns a value or raises a stable `ResourceBridgeError`.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -80,6 +81,7 @@ from semshell.security.principal import Principal
 from semshell.software.catalog import ProcessCatalog
 from semshell.software.image import ProcessImage, ProcessImageDescriptor, ProcessSpec
 from semshell.software.program import ProcessProgram
+from semshell.values import freeze_public_value
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +192,9 @@ class ProcessKernel:
             if pcb.context.owner_pid is None and pcb.state not in TERMINAL_STATES
         ]
         for pid in roots:
-            await self.cancel(pid, mode=CancelMode.TREE, reason="kernel stopped")
+            await self._cancel_tree_after_failures(
+                self._get_process(pid), reason="kernel stopped"
+            )
         await self._drain_finished_tasks()
         async with self._lifecycle_lock:
             self._state = KernelState.STOPPED
@@ -356,12 +360,27 @@ class ProcessKernel:
                         owned_cleanup.add(item.pid)
                 completion = pcb.completion
 
+        if owned_cleanup:
+            cleanup = asyncio.create_task(
+                self._complete_cancellation_sequence(selected, owned_cleanup, reason)
+            )
+            self._tasks.add(cleanup)
+            cleanup.add_done_callback(self._tasks.discard)
+        return await asyncio.shield(completion)
+
+    async def _complete_cancellation_sequence(
+        self,
+        selected: tuple[ProcessControlBlock, ...],
+        owned_cleanup: set[int],
+        reason: str,
+    ) -> None:
+        """Finish an accepted cancellation independently of its requester."""
+
         for item in selected:
             if item.pid in owned_cleanup:
                 await self._complete_cancellation(item, reason)
             elif item.state is ProcessState.CANCELLING:
                 await asyncio.shield(item.completion)
-        return await asyncio.shield(completion)
 
     def inspect(self, pid: int) -> ProcessSnapshot:
         return self._snapshot(self._get_process(pid))
@@ -425,8 +444,19 @@ class ProcessKernel:
         if len(self._processes) + len(specs) > self.max_processes:
             raise OperationDenied("process limit exceeded")
         parent = self._get_process(parent_pid) if parent_pid is not None else None
-        prepared: list[tuple[ProcessSpec, ProcessImage, ProcessProgram, Authority]] = []
+        if parent is not None and parent.state not in {
+            ProcessState.READY,
+            ProcessState.RUNNING,
+            ProcessState.WAITING,
+        }:
+            raise OperationDenied(
+                "parent process cannot create children in its current state"
+            )
+        prepared: list[
+            tuple[ProcessSpec, ProcessImage, ProcessProgram, Authority, Mapping[str, Any]]
+        ] = []
         for spec in specs:
+            metadata = freeze_public_value(spec.metadata)
             image = self.catalog.resolve(
                 image=spec.image,
                 capability=spec.capability,
@@ -439,10 +469,10 @@ class ProcessKernel:
                 principal=principal,
                 authority_ceiling=authority_ceiling,
             )
-            prepared.append((spec, image, image.factory(), authority))
+            prepared.append((spec, image, image.factory(), authority, metadata))
         loop = asyncio.get_running_loop()
         pids: list[int] = []
-        for spec, image, program, authority in prepared:
+        for spec, image, program, authority, metadata in prepared:
             pid = self._allocate_pid()
             owner_pid = (
                 parent_pid
@@ -458,7 +488,7 @@ class ProcessKernel:
                 principal=principal,
                 authority=authority,
                 input=spec.input,
-                metadata=spec.metadata,
+                metadata=metadata,
             )
             pcb = ProcessControlBlock(
                 context=context,
@@ -704,6 +734,23 @@ class ProcessKernel:
             )
             record.task = task
 
+            def settle_prestart_cancellation(completed: asyncio.Task[None]) -> None:
+                self._resource_task_done(record, completed)
+
+            task.add_done_callback(settle_prestart_cancellation)
+
+    def _resource_task_done(
+        self, record: ResourceTaskRecord, task: asyncio.Task[None]
+    ) -> None:
+        """Settle a task cancelled before its coroutine first executes."""
+
+        if task.cancelled() and not record.slot_released:
+            asyncio.create_task(
+                self._settle_resource(
+                    record, error_code=ResourceErrorCode.CANCELLED
+                )
+            )
+
     async def _run_resource(
         self, record: ResourceTaskRecord, bridge: HostResourceBridge
     ) -> None:
@@ -890,7 +937,7 @@ class ProcessKernel:
             child_pids = self._admit_many(
                 action.specs, principal=pcb.context.principal, parent_pid=pcb.pid
             )
-        except (LookupError, OperationDenied, ValueError) as exc:
+        except (LookupError, OperationDenied, TypeError, ValueError) as exc:
             self._reject(pcb, "spawn", exc)
             return
         if action.wait:
@@ -913,6 +960,13 @@ class ProcessKernel:
     async def _apply_cancel(self, caller: ProcessControlBlock, action: Cancel) -> None:
         try:
             target = self._get_process(action.target_pid)
+            owned = self._subtree_pids(caller)
+            if target.pid not in owned and Permission(
+                "process.cancel", str(target.pid)
+            ) not in caller.context.authority.permissions:
+                raise OperationDenied(
+                    "cancel target is not owned and requires process.cancel authority"
+                )
             selected = (
                 self._subtree_pids(target)
                 if action.mode is CancelMode.TREE
@@ -1036,20 +1090,38 @@ class ProcessKernel:
     async def _fail_abnormally(
         self, pcb: ProcessControlBlock, exc: BaseException
     ) -> None:
-        if pcb.state in TERMINAL_STATES or pcb.state is ProcessState.CANCELLING:
-            return
-        pcb.state = ProcessState.FAILING
+        async with self._decision_lock:
+            if pcb.state in TERMINAL_STATES or pcb.state is ProcessState.CANCELLING:
+                return
+            if pcb.state is not ProcessState.FAILING:
+                pcb.state = ProcessState.FAILING
         for child_pid in sorted(self._active_children(pcb), reverse=True):
-            await self.cancel(
-                child_pid,
-                mode=CancelMode.TREE,
-                reason=f"owner {pcb.pid} failed",
+            child = self._processes[child_pid]
+            await self._cancel_tree_after_failures(
+                child, reason=f"owner {pcb.pid} failed"
             )
         self._finish(
             pcb,
             ProcessState.FAILED,
             error=self._normalize_error(exc, ErrorOrigin.PROGRAM),
         )
+
+    async def _cancel_tree_after_failures(
+        self, root: ProcessControlBlock, *, reason: str
+    ) -> None:
+        while True:
+            try:
+                await self.cancel(root.pid, mode=CancelMode.TREE, reason=reason)
+                return
+            except OperationDenied:
+                failing = [
+                    item.completion
+                    for item in self._cancellation_postorder(root)
+                    if item.state is ProcessState.FAILING
+                ]
+                if not failing:
+                    raise
+                await asyncio.gather(*(asyncio.shield(future) for future in failing))
 
     async def _complete_cancellation(
         self, pcb: ProcessControlBlock, reason: str

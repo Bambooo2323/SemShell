@@ -6,12 +6,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from types import MappingProxyType
 from typing import Any
 
 from semshell.resources.types import ResourceInvocationId
 from semshell.security.authority import Authority
 from semshell.security.principal import Principal
+from semshell.values import freeze_public_value
 
 
 class ProcessState(StrEnum):
@@ -82,7 +82,7 @@ class ProcessError:
             raise ValueError("error code must not be empty")
         if not self.message:
             raise ValueError("error message must not be empty")
-        object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
+        object.__setattr__(self, "details", freeze_public_value(self.details))
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +100,7 @@ class ProcessContext:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        object.__setattr__(self, "metadata", freeze_public_value(self.metadata))
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,10 +123,9 @@ class ProcessResult:
             raise ValueError("a process result requires a completion state")
         if self.state is ProcessState.FAILED and self.error is None:
             raise ValueError("a failed process result requires an error")
-        object.__setattr__(self, "usage", MappingProxyType(dict(self.usage)))
-        object.__setattr__(
-            self, "diagnostics", MappingProxyType(dict(self.diagnostics))
-        )
+        object.__setattr__(self, "result", freeze_public_value(self.result))
+        object.__setattr__(self, "usage", freeze_public_value(self.usage))
+        object.__setattr__(self, "diagnostics", freeze_public_value(self.diagnostics))
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,4 +149,4 @@ class ProcessSnapshot:
     def __post_init__(self) -> None:
         object.__setattr__(self, "child_pids", tuple(self.child_pids))
         object.__setattr__(self, "waiting_for", tuple(self.waiting_for))
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        object.__setattr__(self, "metadata", freeze_public_value(self.metadata))

@@ -262,13 +262,14 @@ The session's Authority is a ceiling, not an automatic grant to newly spawned
 Processes.
 
 - Requested root-process authority must be a subset of session Authority.
-- A request to operate on an existing Process requires the relevant scoped
-  permission under system policy.
+- `CancelProcess`, `ReapProcess`, and `UnregisterImage` require the explicit
+  unscoped administration permissions `control.process.cancel`,
+  `control.process.reap`, and `control.catalog.unregister`, respectively.
 - Visibility through a CLI listing or future namespace does not grant mutation
   authority.
-- Gateway checks provide early rejection, but the Kernel operation remains the
-  authoritative policy enforcement point. The gateway must not be the only
-  security boundary.
+- The gateway authenticates ControlSession administration permissions. Public
+  Kernel methods beneath this in-process boundary are trusted Host calls and do
+  not accept a ControlContext.
 - Every admitted mutating request emits an audit record containing session,
   Principal, operation, target, requested authority where applicable, outcome,
   and policy reason.

@@ -14,6 +14,7 @@ from semshell.control import (
     ReplyStatus,
     RequestId,
 )
+from semshell.control.gateway import CONTROL_CANCEL
 from semshell.kernel import (
     Exit,
     ProcessContext,
@@ -167,6 +168,11 @@ async def test_interrupted_dispatched_spawn_is_not_rolled_back() -> None:
         AuditOutcome.INTERRUPTED,
         AuditOutcome.LATE_SUCCEEDED,
     ]
+    assert gateway.audit_records()[1].details["created_pids"] == (1,)
+    assert (
+        gateway.audit_records()[1].details["policy_reason"]
+        == "spawn admission policy accepted"
+    )
     await gateway.close_session(session)
     await kernel.stop()
 
@@ -247,6 +253,49 @@ async def test_spawn_authority_cannot_exceed_session_ceiling() -> None:
     assert reply.error.retryable is True
     assert kernel.process_count == 0
     await gateway.close_session(session)
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_control_cancel_requires_explicit_administration_authority() -> None:
+    from semshell.kernel.operations import CancelProcess
+
+    kernel = ProcessKernel(catalog())
+    await kernel.start()
+    pid = await kernel.spawn(
+        ProcessSpec(image="passive@1"), principal=Principal.parse("human:owner")
+    )
+    gateway = ControlGateway(kernel)
+    denied_session = gateway.open_session(
+        principal=Principal.parse("human:other"), authority=Authority.empty()
+    )
+    denied = await gateway.submit(
+        denied_session, request("denied", CancelProcess(pid))
+    )
+    denied_reply = await denied.wait_reply()
+
+    assert denied_reply.status is ReplyStatus.REJECTED
+    assert denied_reply.error is not None
+    assert denied_reply.error.code == "policy.operation_denied"
+    assert kernel.inspect(pid).state is not ProcessState.CANCELLED
+
+    admin_session = gateway.open_session(
+        principal=Principal.parse("human:admin"),
+        authority=Authority.of((CONTROL_CANCEL,)),
+    )
+    allowed = await gateway.submit(
+        admin_session, request("allowed", CancelProcess(pid))
+    )
+    assert (await allowed.wait_reply()).status is ReplyStatus.SUCCEEDED
+    assert kernel.inspect(pid).state is ProcessState.CANCELLED
+    allowed_audit = gateway.audit_records()[-1]
+    assert allowed_audit.details["target_pid"] == pid
+    assert (
+        allowed_audit.details["policy_reason"]
+        == "control administration authority accepted"
+    )
+    await gateway.close_session(denied_session)
+    await gateway.close_session(admin_session)
     await kernel.stop()
 
 

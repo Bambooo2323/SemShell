@@ -99,7 +99,10 @@ Before PID allocation the Kernel:
 5. records an explainable authority decision;
 6. creates the program and Process record.
 
-A failed admission consumes no PID. A child cannot gain authority outside its
+A failed admission consumes no PID. Only READY, RUNNING, or WAITING parents may
+create children.
+Batch admission validates and freezes all Process metadata before allocating
+any PID or publishing any Process record. A child cannot gain authority outside its
 parent without a prior explicit policy approval. Partial grants are permitted
 only when policy allows them and image minimum requirements remain satisfied.
 Approval artifacts are validated against trusted Policy configuration; merely
@@ -109,13 +112,20 @@ revocation, signatures, and single-use behavior are outside version 0.1.
 ## Cancellation and completion
 
 Cancellation, abnormal failure, and normal completion race through one
-authoritative lifecycle decision. Cancellation is idempotent after a terminal
-result exists. Cleanup is bounded; non-cooperative cleanup may be retained only
-for diagnostics and cannot reactivate the Process.
+authoritative lifecycle decision. Once cancellation is accepted, the Kernel
+owns an independent cleanup task; cancellation or failure of the requester
+cannot abandon the target in `CANCELLING`. A concurrently failing child is
+allowed to finish its already committed failure cleanup before its owner
+finishes. Cancellation is idempotent after a terminal result exists.
+Kernel shutdown waits for committed abnormal
+failure cleanup in each root tree before cancelling its remaining live Processes.
+Cleanup is bounded; non-cooperative cleanup may be retained only for diagnostics and
+cannot reactivate the Process.
 
-Completion leaves an immutable ProcessResult available for inspection and
-waiting. Reaping later removes the terminal Process from the live Process Table;
-PIDs are never reused within one Kernel lifetime.
+Completion recursively freezes the structured result and leaves an immutable
+ProcessResult available for inspection and waiting. Reaping later removes the
+terminal Process from the live Process Table; PIDs are never reused within one
+Kernel lifetime.
 
 ## Catalog
 
@@ -144,6 +154,13 @@ external operation returning deterministic immutable Process snapshots.
 The CLI cannot submit `SendMessage`: a ControlSession has no PID from which
 authentic Process IPC could originate. Console input instead targets one
 previously bound shell Process, and Process-to-Process IPC remains an Action.
+
+External mutations require explicit unscoped administration permissions in
+version 0.3: `control.process.cancel`, `control.process.reap`, and
+`control.catalog.unregister`. The trusted local CLI bootstrap receives these
+permissions. An ordinary Process may cancel itself or an attached descendant;
+cancelling an unrelated Process requires exact
+`Permission("process.cancel", str(target_pid))` authority.
 
 ## Role neutrality
 

@@ -76,6 +76,8 @@ same orderly shutdown and returns `130`. Startup or shutdown failure returns
 awaits live root Processes but does not reap their terminal records. The CLI
 adds no second shutdown timeout or escalation mechanism in 0.3.
 
+Terminal input is read outside the asyncio event-loop thread, so Process
+scheduling and resource completion continue while the prompt is idle.
 `KeyboardInterrupt` while reading input begins shutdown immediately. While a
 parsed request is being submitted or its reply is awaited, submission is
 shielded long enough to obtain its RequestHandle; the adapter then calls
@@ -87,8 +89,10 @@ Interrupting request observation never cancels or rolls back a Process effect.
 
 Bootstrap code establishes the local session Principal and Authority before
 opening the session. Command text cannot claim a Principal or expand the
-session Authority. Requested Process authority in `spawn` remains bounded by
-the session Authority and image policy.
+session Authority. The local proof grants only `control.process.cancel`,
+`control.process.reap`, and `control.catalog.unregister` administration
+permissions. Requested Process authority in `spawn` remains bounded by the
+session Authority and image policy.
 
 The first proof may use a deterministic built-in demo Catalog and explicit
 bootstrap Authority configuration. Image installation and arbitrary Python
@@ -214,7 +218,8 @@ The adapter renders every terminal ControlReply as one JSON-compatible object:
 }
 ```
 
-A single recursive encoder owns conversion of public dataclasses, enums,
+A single recursive encoder owns conversion of an explicit closed set of
+SemShell public dataclasses and enums,
 Mapping values, tuples, sets, Principal, Authority, Permission, and timestamps.
 It must reject unsupported Host objects rather than use `repr()` or
 `default=str`, because those fallbacks can leak factories, bridges, paths, or

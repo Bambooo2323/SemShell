@@ -161,6 +161,34 @@ async def test_cancellation_suppresses_late_bridge_result_and_retains_capacity()
 
 
 @pytest.mark.asyncio
+async def test_resource_cancelled_before_first_step_releases_capacity() -> None:
+    class NeverStartedBridge:
+        def __init__(self) -> None:
+            self.invocations = 0
+
+        async def invoke(self, invocation):  # type: ignore[no-untyped-def]
+            self.invocations += 1
+            await asyncio.Event().wait()
+
+    bridge = NeverStartedBridge()
+    kernel = make_kernel(bridge, capacity=1)
+    first = await spawn_reader(kernel, {"path": "a.txt"})
+    while kernel.inspect(first).state is not ProcessState.WAITING:
+        await asyncio.sleep(0)
+
+    cancelled = await kernel.cancel(first)
+    for _ in range(100):
+        if kernel.resource_invocation_count == 0:
+            break
+        await asyncio.sleep(0)
+
+    assert cancelled.state is ProcessState.CANCELLED
+    assert kernel.resource_invocation_count == 0
+    assert bridge.invocations == 0
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
 async def test_unexpected_bridge_failure_is_sanitized() -> None:
     class BrokenBridge:
         async def invoke(self, invocation):  # type: ignore[no-untyped-def]

@@ -602,9 +602,11 @@ Spawn; they are gated by the new wait registration under Section 8.
 
 ### 11.3 Cancel
 
-`Cancel` requests `self` or `tree` cancellation of a target process for which
-the caller has authority. It is an ordinary user-space Action even though the
-accepted operation uses Kernel lifecycle control.
+`Cancel` requests `self` or `tree` cancellation of the caller or one of its
+attached descendants. An unrelated target requires exact
+`Permission("process.cancel", str(target_pid))` authority. It is an ordinary
+user-space Action even though the accepted operation uses Kernel lifecycle
+control.
 
 If accepted, the caller receives one `OperationCompleted` continuation event
 after the lifecycle request has been committed and every active selected target
@@ -619,6 +621,12 @@ produces `OperationRejected`. If the selected `self` or `tree` cancellation set
 contains the caller anywhere in that set, no continuation event is produced
 because the caller moves from `RUNNING` to `CANCELLING` as the Action is
 applied.
+
+Acceptance transfers cleanup ownership to an independent Kernel task. The
+requesting activation may be cancelled without abandoning any accepted target
+in `CANCELLING`. If abnormal owner cleanup encounters a child whose `FAILING`
+decision already won, it waits for that child's bounded cleanup and terminal
+result before completing the owner failure.
 
 ### 11.4 Detach
 
@@ -649,7 +657,8 @@ normalize into one.
 
 Completion and reaping are separate:
 
-- completion publishes an immutable ProcessResult and leaves the process
+- completion recursively freezes the structured result, publishes an immutable
+  ProcessResult, and leaves the process
   inspectable;
 - reaping removes the process control record from the active Process Table.
 

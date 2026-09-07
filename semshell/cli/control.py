@@ -34,7 +34,7 @@ class LocalControlCLI:
                 try:
                     self.prompt_output.write("semshell> ")
                     self.prompt_output.flush()
-                    line = self.source.readline()
+                    line = await asyncio.to_thread(self.source.readline)
                 except KeyboardInterrupt:
                     exit_code = 130
                     break

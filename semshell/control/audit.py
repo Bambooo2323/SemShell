@@ -6,13 +6,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from types import MappingProxyType
 from typing import Any
 
 from semshell.control.error import ControlError
 from semshell.control.request import RequestId
 from semshell.control.session import SessionId
 from semshell.security.principal import Principal
+from semshell.values import freeze_public_value
 
 
 class AuditOutcome(StrEnum):
@@ -39,4 +39,4 @@ class ControlAuditRecord:
     details: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
+        object.__setattr__(self, "details", freeze_public_value(self.details))

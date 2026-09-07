@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from semshell.control import ControlGateway, ControlSession
+from semshell.control.gateway import (
+    CONTROL_CANCEL,
+    CONTROL_CATALOG_UNREGISTER,
+    CONTROL_REAP,
+)
 from semshell.examples.architecture_demo import build_demo_catalog
 from semshell.kernel import ProcessKernel
 from semshell.security import Authority, Principal
@@ -27,6 +32,8 @@ async def build_control_runtime() -> ControlRuntime:
     gateway = ControlGateway(kernel)
     session = gateway.open_session(
         principal=Principal.parse("human:local-control"),
-        authority=Authority.empty(),
+        authority=Authority.of(
+            (CONTROL_CANCEL, CONTROL_REAP, CONTROL_CATALOG_UNREGISTER)
+        ),
     )
     return ControlRuntime(kernel, gateway, session)

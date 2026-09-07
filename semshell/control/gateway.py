@@ -31,7 +31,7 @@ from semshell.kernel.operations import (
     UnregisterImage,
     WaitProcess,
 )
-from semshell.security.authority import Authority
+from semshell.security.authority import Authority, Permission
 from semshell.security.principal import Principal
 
 MUTATING_OPERATION_TYPES = (
@@ -40,6 +40,10 @@ MUTATING_OPERATION_TYPES = (
     ReapProcess,
     UnregisterImage,
 )
+
+CONTROL_CANCEL = Permission("control.process.cancel")
+CONTROL_REAP = Permission("control.process.reap")
+CONTROL_CATALOG_UNREGISTER = Permission("control.catalog.unregister")
 
 
 class ControlGateway:
@@ -192,6 +196,7 @@ class ControlGateway:
                 provider=operation.provider,
             )
         if isinstance(operation, UnregisterImage):
+            self._require_permission(session, CONTROL_CATALOG_UNREGISTER)
             return self.kernel.unregister_image(operation.reference)
         if isinstance(operation, SpawnProcesses):
             return await self.kernel.spawn_many(
@@ -202,6 +207,7 @@ class ControlGateway:
         if isinstance(operation, WaitProcess):
             return await self.kernel.wait(operation.pid, timeout=operation.timeout)
         if isinstance(operation, CancelProcess):
+            self._require_permission(session, CONTROL_CANCEL)
             return await self.kernel.cancel(
                 operation.target_pid,
                 mode=operation.mode,
@@ -212,8 +218,18 @@ class ControlGateway:
         if isinstance(operation, InspectTree):
             return self.kernel.tree(operation.pid)
         if isinstance(operation, ReapProcess):
+            self._require_permission(session, CONTROL_REAP)
             return await self.kernel.reap(operation.pid)
         raise TypeError(f"unsupported external operation: {type(operation).__name__}")
+
+    @staticmethod
+    def _require_permission(
+        session: ControlSession, permission: Permission
+    ) -> None:
+        if permission not in session.context.authority.permissions:
+            raise OperationDenied(
+                f"control operation requires {permission.capability}"
+            )
 
     def _record_reply(
         self, session: ControlSession, handle: RequestHandle, reply: ControlReply
@@ -223,6 +239,15 @@ class ControlGateway:
             ReplyStatus.REJECTED: AuditOutcome.REJECTED,
             ReplyStatus.INTERRUPTED: AuditOutcome.INTERRUPTED,
         }
+        details = self._operation_audit_details(
+            handle.request.operation, value=reply.value
+        )
+        if reply.error is not None:
+            details["policy_reason"] = reply.error.message
+        elif isinstance(handle.request.operation, SpawnProcesses):
+            details["policy_reason"] = "spawn admission policy accepted"
+        elif isinstance(handle.request.operation, MUTATING_OPERATION_TYPES):
+            details["policy_reason"] = "control administration authority accepted"
         self._audit.append(
             ControlAuditRecord(
                 session_id=session.session_id,
@@ -231,8 +256,41 @@ class ControlGateway:
                 operation=handle.operation_name,
                 outcome=outcomes[reply.status],
                 error=reply.error,
+                details=details,
             )
         )
+
+    @staticmethod
+    def _operation_audit_details(
+        operation: Any, *, value: Any = None
+    ) -> dict[str, Any]:
+        if isinstance(operation, CancelProcess):
+            return {"target_pid": operation.target_pid, "mode": operation.mode.value}
+        if isinstance(operation, ReapProcess):
+            return {"target_pid": operation.pid}
+        if isinstance(operation, UnregisterImage):
+            return {"target_image": operation.reference}
+        if isinstance(operation, SpawnProcesses):
+            details = {
+                "requested_authority": tuple(
+                    tuple(
+                        {
+                            "capability": permission.capability,
+                            "scope": permission.scope,
+                        }
+                        for permission in sorted(spec.requested_authority.permissions)
+                    )
+                    for spec in operation.specs
+                )
+            }
+            if (
+                isinstance(value, tuple)
+                and value
+                and all(isinstance(pid, int) for pid in value)
+            ):
+                details["created_pids"] = value
+            return details
+        return {}
 
     def _record_late_when_done(
         self,
@@ -268,7 +326,16 @@ class ControlGateway:
         value: Any = None,
         error: ControlError | None = None,
     ) -> None:
-        details = {} if error is not None else {"result": value}
+        details = self._operation_audit_details(
+            handle.request.operation, value=value
+        )
+        details["policy_reason"] = (
+            error.message
+            if error is not None
+            else "spawn admission policy accepted"
+            if isinstance(handle.request.operation, SpawnProcesses)
+            else "control administration authority accepted"
+        )
         self._audit.append(
             ControlAuditRecord(
                 session_id=session.session_id,

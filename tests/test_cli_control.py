@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from io import StringIO
 
 import pytest
@@ -125,6 +128,26 @@ def test_public_encoder_is_deterministic_and_rejects_host_values() -> None:
     with pytest.raises(TypeError):
         encode_public_value(float("nan"))
 
+    @dataclass
+    class HostCredential:
+        secret: str
+
+    with pytest.raises(TypeError):
+        encode_public_value(HostCredential("must-not-be-rendered"))
+
+    @dataclass(frozen=True, slots=True)
+    class HostPermission(Permission):
+        secret: str = "must-not-be-rendered"
+
+    with pytest.raises(TypeError):
+        encode_public_value(HostPermission("demo"))
+
+    class HostSecret(StrEnum):
+        VALUE = "must-not-be-rendered"
+
+    with pytest.raises(TypeError):
+        encode_public_value(HostSecret.VALUE)
+
 
 def test_unencodable_reply_uses_safe_display_substitution() -> None:
     reply = ControlReply(
@@ -174,6 +197,31 @@ async def test_scripted_control_session_preserves_one_live_runtime() -> None:
     assert values[6]["adapter_error"]["code"] == "cli.unknown_command"
     assert replies[6]["operation"] == "ListImages"
     assert "semshell> " in prompts.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_waiting_for_terminal_input_does_not_block_process_scheduling() -> None:
+    runtime = await build_control_runtime()
+    completed = asyncio.Event()
+
+    class DelayedProgram(PassiveProgram):
+        async def handle(self, context: ProcessContext, event: object):  # type: ignore[no-untyped-def]
+            await asyncio.sleep(0.01)
+            completed.set()
+            return Yield()
+
+    runtime.kernel.register_image(ProcessImage("delayed", "1", DelayedProgram))
+    await runtime.kernel.spawn(
+        ProcessSpec(image="delayed@1"), principal=Principal.parse("human:test")
+    )
+
+    class SlowInput(StringIO):
+        def readline(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            time.sleep(0.05)
+            return "quit\n"
+
+    await LocalControlCLI(runtime, SlowInput(), StringIO(), StringIO()).run()
+    assert completed.is_set()
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,68 @@ from enum import Enum
 from typing import Any
 
 from semshell.control import ControlReply
+from semshell.control.audit import AuditOutcome, ControlAuditRecord
+from semshell.control.error import ControlError, ControlErrorOrigin
+from semshell.control.reply import ReplyStatus
+from semshell.control.request import RequestId
+from semshell.control.session import SessionId
+from semshell.kernel.events import MessageKind
+from semshell.kernel.process import (
+    CancelMode,
+    ErrorOrigin,
+    OwnershipMode,
+    ProcessError,
+    ProcessResult,
+    ProcessSnapshot,
+    ProcessState,
+    WaitMode,
+)
+from semshell.resources.types import (
+    ResourceAuditEvent,
+    ResourceAuditPhase,
+    ResourceBindingDescriptor,
+    ResourceBindingId,
+    ResourceErrorCode,
+    ResourceInvocationId,
+)
 from semshell.security import Permission
+from semshell.security.authority import Authority
+from semshell.security.principal import Principal
+from semshell.software.image import CapabilitySpec, ProcessImageDescriptor
+
+_PUBLIC_DATACLASS_TYPES = (
+    Authority,
+    CapabilitySpec,
+    ControlAuditRecord,
+    ControlError,
+    ControlReply,
+    Permission,
+    Principal,
+    ProcessError,
+    ProcessImageDescriptor,
+    ProcessResult,
+    ProcessSnapshot,
+    RequestId,
+    ResourceAuditEvent,
+    ResourceBindingDescriptor,
+    ResourceBindingId,
+    ResourceInvocationId,
+    SessionId,
+)
+
+_PUBLIC_ENUM_TYPES = (
+    AuditOutcome,
+    CancelMode,
+    ControlErrorOrigin,
+    ErrorOrigin,
+    MessageKind,
+    OwnershipMode,
+    ProcessState,
+    ReplyStatus,
+    ResourceAuditPhase,
+    ResourceErrorCode,
+    WaitMode,
+)
 
 
 class PublicValueEncodingError(TypeError):
@@ -21,6 +82,10 @@ class PublicValueEncodingError(TypeError):
 def encode_public_value(value: Any) -> Any:
     """Recursively encode supported immutable public values."""
 
+    if isinstance(value, Enum):
+        if not isinstance(value, _PUBLIC_ENUM_TYPES):
+            raise PublicValueEncodingError("unsupported public enum")
+        return encode_public_value(value.value)
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
@@ -33,8 +98,6 @@ def encode_public_value(value: Any) -> Any:
         return value.astimezone(UTC).isoformat(timespec="microseconds").replace(
             "+00:00", "Z"
         )
-    if isinstance(value, Enum):
-        return encode_public_value(value.value)
     if isinstance(value, Mapping):
         if any(not isinstance(key, str) for key in value):
             raise PublicValueEncodingError("mapping key is not a string")
@@ -57,7 +120,11 @@ def encode_public_value(value: Any) -> Any:
         else:
             items.sort(key=lambda item: canonical_json(encode_public_value(item)))
         return [encode_public_value(item) for item in items]
-    if is_dataclass(value) and not isinstance(value, type):
+    if (
+        is_dataclass(value)
+        and not isinstance(value, type)
+        and type(value) in _PUBLIC_DATACLASS_TYPES
+    ):
         return {
             field.name: encode_public_value(getattr(value, field.name))
             for field in fields(value)

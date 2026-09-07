@@ -88,9 +88,12 @@ configuration to guest software.
 
 The local Control CLI derives its Principal and Authority from trusted
 bootstrap configuration. Command text cannot replace that identity or enlarge
-the session Authority. It emits only explicitly encoded public values and
-fails closed on arbitrary Host objects instead of falling back to `repr()` or
-exception text.
+the session Authority. Its bootstrap grants the three administration
+permissions required by its mutating commands: `control.process.cancel`,
+`control.process.reap`, and `control.catalog.unregister`. Its encoder accepts
+structured containers and scalar values, plus an explicit closed set of
+SemShell dataclass and Enum types. It fails closed on arbitrary Host objects
+instead of falling back to `repr()` or exception text.
 
 ## Production containment boundary
 
