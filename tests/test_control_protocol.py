@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 import pytest
 
 from semshell.control import (
     ControlError,
     ControlErrorOrigin,
+    ControlReply,
     ControlRequest,
     ControlSession,
     ReplyStatus,
@@ -126,3 +128,58 @@ async def test_session_close_interrupts_unreplied_requests_only() -> None:
     assert not await control_session.interrupt(RequestId("missing"))
     with pytest.raises(SessionProtocolError, match="not open"):
         await control_session.admit(request("late"))
+
+
+@pytest.mark.asyncio
+async def test_close_and_reply_race_commits_one_reply_audit_hook() -> None:
+    control_session = session()
+    handle = await control_session.admit(request("race"))
+    committed: list[ReplyStatus] = []
+    close_started = asyncio.Event()
+    allow_close_interrupt = asyncio.Event()
+    original_interrupt = handle.interrupt
+
+    async def delayed_interrupt(reason: str = "request interrupted") -> bool:
+        close_started.set()
+        await allow_close_interrupt.wait()
+        return await original_interrupt(reason)
+
+    handle.interrupt = delayed_interrupt  # type: ignore[method-assign]
+    handle.bind_reply_commit(lambda reply: lambda: committed.append(reply.status))
+
+    close_task = asyncio.create_task(control_session.close())
+    await asyncio.wait_for(close_started.wait(), timeout=1)
+
+    assert await handle.succeed(())
+    allow_close_interrupt.set()
+    await close_task
+
+    assert (await handle.wait_reply()).status is ReplyStatus.SUCCEEDED
+    assert committed == [ReplyStatus.SUCCEEDED]
+
+
+@pytest.mark.asyncio
+async def test_failed_reply_audit_preparation_leaves_no_partial_reply_or_audit() -> None:
+    handle = await session().admit(request("audit-failure"))
+    committed: list[ReplyStatus] = []
+    fail = True
+
+    def prepare(reply: ControlReply) -> Callable[[], None]:
+        if fail:
+            raise RuntimeError("audit preparation failed")
+        return lambda: committed.append(reply.status)
+
+    handle.bind_reply_commit(prepare)
+
+    with pytest.raises(RuntimeError, match="audit preparation failed"):
+        await handle.succeed(())
+
+    assert handle.state is RequestState.ADMITTED
+    assert not handle.is_replied
+    assert committed == []
+    fail = False
+    assert await handle.interrupt()
+    assert (await handle.wait_reply()).status is ReplyStatus.INTERRUPTED
+    assert committed == [ReplyStatus.INTERRUPTED]
+    fail = True
+    assert not await handle.succeed(())  # A losing reply does not prepare audit data.

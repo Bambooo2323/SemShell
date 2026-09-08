@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -32,6 +33,16 @@ class ResourceTaskRecord:
     slot_released: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class TerminalDecision:
+    """Frozen winner of a Process's terminal competition."""
+
+    state: ProcessState
+    decided_at: datetime
+    result: Any = None
+    error: ProcessError | None = None
+
+
 @dataclass(slots=True)
 class ProcessControlBlock:
     """Mutable scheduling state that is never exposed to user-space code."""
@@ -47,6 +58,11 @@ class ProcessControlBlock:
     wait_mode: WaitMode | None = None
     result: ProcessResult | None = None
     runner: asyncio.Task[None] | None = None
+    decision: TerminalDecision | None = None
+    finalizer_task: asyncio.Task[None] | None = None
+    stop_task: asyncio.Task[None] | None = None
+    operation_completion: asyncio.Future[ProcessResult] | None = None
+    operation_callback: Callable[[asyncio.Future[ProcessResult]], None] | None = None
     pending_error: ProcessError | None = None
     pending_resource_invocation_id: ResourceInvocationId | None = None
     private: dict[str, Any] = field(default_factory=dict)

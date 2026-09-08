@@ -79,6 +79,16 @@ class DelayedSpawnKernel(ProcessKernel):
         )
 
 
+class AuditSignallingGateway(ControlGateway):
+    def __init__(self, kernel: ProcessKernel, *, max_mutations: int = 16) -> None:
+        super().__init__(kernel, max_mutations=max_mutations)
+        self.late_recorded = asyncio.Event()
+
+    def _record_late(self, *args: Any, **kwargs: Any) -> None:
+        super()._record_late(*args, **kwargs)
+        self.late_recorded.set()
+
+
 def catalog() -> ProcessCatalog:
     result = ProcessCatalog()
     result.register(ProcessImage("passive", "1", PassiveProgram))
@@ -174,6 +184,74 @@ async def test_interrupted_dispatched_spawn_is_not_rolled_back() -> None:
         == "spawn admission policy accepted"
     )
     await gateway.close_session(session)
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_reply_during_session_close_has_only_one_terminal_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = DelayedSpawnKernel(catalog())
+    await kernel.start()
+    gateway = ControlGateway(kernel)
+    session = gateway.open_session(
+        principal=Principal.parse("human:test"), authority=Authority.empty()
+    )
+    handle = await gateway.submit(
+        session, request("close-success", SpawnProcesses((ProcessSpec(image="exit@1"),)))
+    )
+    await asyncio.wait_for(kernel.spawn_started.wait(), timeout=1)
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+    interrupt = handle.interrupt
+
+    async def delayed_interrupt(reason: str) -> bool:
+        close_started.set()
+        await release_close.wait()
+        return await interrupt(reason)
+
+    monkeypatch.setattr(handle, "interrupt", delayed_interrupt)
+    closing = asyncio.create_task(gateway.close_session(session))
+    await asyncio.wait_for(close_started.wait(), timeout=1)
+    kernel.release_spawn.set()
+    assert (await asyncio.wait_for(handle.wait_reply(), timeout=1)).status is ReplyStatus.SUCCEEDED
+    release_close.set()
+    await asyncio.wait_for(closing, timeout=1)
+    assert [record.outcome for record in gateway.audit_records()] == [AuditOutcome.SUCCEEDED]
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_close_of_inflight_mutation_commits_one_reply_and_one_late_audit() -> None:
+    kernel = DelayedSpawnKernel(catalog())
+    await kernel.start()
+    gateway = AuditSignallingGateway(kernel)
+    session = gateway.open_session(
+        principal=Principal.parse("human:test"), authority=Authority.empty()
+    )
+    handle = await gateway.submit(
+        session,
+        request(
+            "close-race",
+            SpawnProcesses((ProcessSpec(image="exit@1", input="created"),)),
+        ),
+    )
+    await asyncio.wait_for(kernel.spawn_started.wait(), timeout=1)
+
+    await gateway.close_session(session)
+    assert (await handle.wait_reply()).status is ReplyStatus.INTERRUPTED
+    assert [record.outcome for record in gateway.audit_records()] == [
+        AuditOutcome.INTERRUPTED
+    ]
+
+    kernel.release_spawn.set()
+    await asyncio.wait_for(gateway.late_recorded.wait(), timeout=1)
+
+    assert kernel.process_count == 1
+    assert [record.outcome for record in gateway.audit_records()] == [
+        AuditOutcome.INTERRUPTED,
+        AuditOutcome.LATE_SUCCEEDED,
+    ]
     await kernel.stop()
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from semshell.control.audit import AuditOutcome, ControlAuditRecord
@@ -87,8 +88,10 @@ class ControlGateway:
         handle = await session.admit(request)
         key = (session.session_id, request.request_id)
         self._handles[key] = handle
+        handle.bind_reply_commit(
+            lambda reply: self._prepare_reply_audit(session, handle, reply)
+        )
         if not await session.dispatch(handle):
-            self._record_reply(session, handle, await handle.wait_reply())
             return handle
 
         task = asyncio.create_task(self._run(session, handle))
@@ -114,8 +117,6 @@ class ControlGateway:
         if not won:
             return False
         key = (session.session_id, request_id)
-        handle = self._handles[key]
-        self._record_reply(session, handle, await handle.wait_reply())
         handler = self._handlers.get(key)
         if handler is not None:
             handler.cancel()
@@ -127,14 +128,12 @@ class ControlGateway:
         """Close admission, interrupt observations, and release handler tasks."""
 
         related = [
-            (key, handle, handle.is_replied)
+            (key, handle)
             for key, handle in self._handles.items()
             if key[0] == session.session_id
         ]
         await session.close(reason)
-        for key, handle, was_replied in related:
-            if not was_replied:
-                self._record_reply(session, handle, await handle.wait_reply())
+        for key, _ in related:
             handler = self._handlers.get(key)
             if handler is not None:
                 handler.cancel()
@@ -145,7 +144,7 @@ class ControlGateway:
         ]
         if handlers:
             await asyncio.gather(*handlers, return_exceptions=True)
-        for key, _, _ in related:
+        for key, _ in related:
             self._handles.pop(key, None)
 
     async def _run(self, session: ControlSession, handle: RequestHandle) -> None:
@@ -168,15 +167,13 @@ class ControlGateway:
         except Exception as exc:  # noqa: BLE001
             error = self._normalize_error(exc)
             if await handle.reject(error):
-                self._record_reply(session, handle, await handle.wait_reply())
-            else:
-                self._record_late(session, handle, error=error)
+                return
+            self._record_late(session, handle, error=error)
             return
 
         if await handle.succeed(value):
-            self._record_reply(session, handle, await handle.wait_reply())
-        else:
-            self._record_late(session, handle, value=value)
+            return
+        self._record_late(session, handle, value=value)
 
     async def _execute_bounded_mutation(
         self, session: ControlSession, operation: Any
@@ -231,9 +228,10 @@ class ControlGateway:
                 f"control operation requires {permission.capability}"
             )
 
-    def _record_reply(
+    def _prepare_reply_audit(
         self, session: ControlSession, handle: RequestHandle, reply: ControlReply
-    ) -> None:
+    ) -> Callable[[], None]:
+        """Build the terminal audit record before the reply is committed."""
         outcomes = {
             ReplyStatus.SUCCEEDED: AuditOutcome.SUCCEEDED,
             ReplyStatus.REJECTED: AuditOutcome.REJECTED,
@@ -248,17 +246,16 @@ class ControlGateway:
             details["policy_reason"] = "spawn admission policy accepted"
         elif isinstance(handle.request.operation, MUTATING_OPERATION_TYPES):
             details["policy_reason"] = "control administration authority accepted"
-        self._audit.append(
-            ControlAuditRecord(
-                session_id=session.session_id,
-                request_id=handle.request_id,
-                principal=session.context.principal,
-                operation=handle.operation_name,
-                outcome=outcomes[reply.status],
-                error=reply.error,
-                details=details,
-            )
+        record = ControlAuditRecord(
+            session_id=session.session_id,
+            request_id=handle.request_id,
+            principal=session.context.principal,
+            operation=handle.operation_name,
+            outcome=outcomes[reply.status],
+            error=reply.error,
+            details=details,
         )
+        return lambda: self._audit.append(record)
 
     @staticmethod
     def _operation_audit_details(

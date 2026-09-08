@@ -9,7 +9,11 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from semshell.kernel._runtime import ProcessControlBlock, ResourceTaskRecord
+from semshell.kernel._runtime import (
+    ProcessControlBlock,
+    ResourceTaskRecord,
+    TerminalDecision,
+)
 from semshell.kernel.actions import (
     Cancel,
     Detach,
@@ -119,6 +123,7 @@ class ProcessKernel:
         self.max_resource_invocations = max_resource_invocations
         self._state = KernelState.STOPPED
         self._lifecycle_lock = asyncio.Lock()
+        self._shutdown_task: asyncio.Task[None] | None = None
         self._decision_lock = asyncio.Lock()
         self._slots = asyncio.Semaphore(max_running)
         self._processes: dict[int, ProcessControlBlock] = {}
@@ -179,21 +184,44 @@ class ProcessKernel:
                 return
             if self._state is KernelState.STOPPING:
                 raise InvalidKernelState("cannot start a stopping kernel")
+            self._shutdown_task = None
             self._state = KernelState.RUNNING
 
     async def stop(self) -> None:
         async with self._lifecycle_lock:
             if self._state is KernelState.STOPPED:
                 return
-            self._state = KernelState.STOPPING
-        roots = [
-            pcb.pid
-            for pcb in self._processes.values()
-            if pcb.context.owner_pid is None and pcb.state not in TERMINAL_STATES
-        ]
-        for pid in roots:
+            if self._shutdown_task is None:
+                self._state = KernelState.STOPPING
+                roots = tuple(
+                    pcb
+                    for pcb in self._processes.values()
+                    if pcb.context.owner_pid is None
+                    and pcb.state not in TERMINAL_STATES
+                )
+                # A running activation may still detach a child while an earlier
+                # root is cleaning up. Keep all admitted identities as a fallback.
+                children = tuple(
+                    pcb for pcb in self._processes.values()
+                    if pcb.context.owner_pid is not None
+                    and pcb.state not in TERMINAL_STATES
+                )
+                self._shutdown_task = asyncio.create_task(
+                    self._shutdown(roots + children)
+                )
+                self._shutdown_task.add_done_callback(self._observe_task)
+            shutdown = self._shutdown_task
+        await asyncio.shield(shutdown)
+
+    @staticmethod
+    def _observe_task(task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            task.exception()
+
+    async def _shutdown(self, targets: tuple[ProcessControlBlock, ...]) -> None:
+        for root in targets:
             await self._cancel_tree_after_failures(
-                self._get_process(pid), reason="kernel stopped"
+                root, reason="kernel stopped"
             )
         await self._drain_finished_tasks()
         async with self._lifecycle_lock:
@@ -309,6 +337,7 @@ class ProcessKernel:
         if (
             target.state is ProcessState.WAITING
             and target.waiting_for is None
+            and target.operation_completion is None
             and target.pending_resource_invocation_id is None
         ):
             target.state = ProcessState.READY
@@ -327,60 +356,40 @@ class ProcessKernel:
     ) -> ProcessResult:
         if not reason:
             raise ValueError("cancellation reason must not be empty")
-        async with self._decision_lock:
-            pcb = self._get_process(pid)
-            if pcb.state in COMPLETION_STATES:
-                assert pcb.result is not None
-                return pcb.result
-            if pcb.state is ProcessState.FAILING:
-                raise OperationDenied("an abnormal failure decision already won")
-            if pcb.state is ProcessState.CANCELLING:
-                completion = pcb.completion
-                selected: tuple[ProcessControlBlock, ...] = ()
-                owned_cleanup: set[int] = set()
-            else:
-                if mode is CancelMode.SELF and self._active_children(pcb):
-                    raise OperationDenied(
-                        "self cancellation would orphan attached children"
-                    )
-                selected = (
-                    self._cancellation_postorder(pcb)
-                    if mode is CancelMode.TREE
-                    else (pcb,)
-                )
-                if any(item.state is ProcessState.FAILING for item in selected):
-                    raise OperationDenied(
-                        "an abnormal failure decision already won in cancellation tree"
-                    )
-                owned_cleanup = set()
-                for item in selected:
-                    if item.state not in COMPLETION_STATES | {ProcessState.CANCELLING}:
-                        item.state = ProcessState.CANCELLING
-                        self._suppress_pending_resource(item)
-                        owned_cleanup.add(item.pid)
-                completion = pcb.completion
+        pcb = self._get_process(pid)
+        self._request_cancel(pcb, mode=mode, reason=reason)
+        return await asyncio.shield(pcb.completion)
 
-        if owned_cleanup:
-            cleanup = asyncio.create_task(
-                self._complete_cancellation_sequence(selected, owned_cleanup, reason)
-            )
-            self._tasks.add(cleanup)
-            cleanup.add_done_callback(self._tasks.discard)
-        return await asyncio.shield(completion)
-
-    async def _complete_cancellation_sequence(
-        self,
-        selected: tuple[ProcessControlBlock, ...],
-        owned_cleanup: set[int],
-        reason: str,
+    def _request_cancel(
+        self, pcb: ProcessControlBlock, *, mode: CancelMode, reason: str
     ) -> None:
-        """Finish an accepted cancellation independently of its requester."""
+        """Validate and register the whole accepted cancellation without yielding."""
 
+        if not reason:
+            raise ValueError("cancellation reason must not be empty")
+        if pcb.result is not None:
+            return
+        if pcb.decision is not None:
+            if pcb.decision.state is ProcessState.FAILED:
+                raise OperationDenied("an abnormal failure decision already won")
+            return
+        if mode is CancelMode.SELF and self._active_children(pcb):
+            raise OperationDenied("self cancellation would orphan attached children")
+        selected = (
+            self._cancellation_postorder(pcb) if mode is CancelMode.TREE else (pcb,)
+        )
+        if any(item.state is ProcessState.FAILING for item in selected):
+            raise OperationDenied(
+                "an abnormal failure decision already won in cancellation tree"
+            )
+        error = ProcessError(
+            code="process_cancelled", message=reason, origin=ErrorOrigin.KERNEL
+        )
+        predecessor: ProcessControlBlock | None = None
         for item in selected:
-            if item.pid in owned_cleanup:
-                await self._complete_cancellation(item, reason)
-            elif item.state is ProcessState.CANCELLING:
-                await asyncio.shield(item.completion)
+            if self._commit_decision(item, ProcessState.CANCELLED, error=error):
+                self._start_finalizer(item, predecessor=predecessor)
+            predecessor = item
 
     def inspect(self, pid: int) -> ProcessSnapshot:
         return self._snapshot(self._get_process(pid))
@@ -392,15 +401,14 @@ class ProcessKernel:
 
     def tree(self, pid: int) -> tuple[ProcessSnapshot, ...]:
         ordered: list[ProcessSnapshot] = []
-
-        def visit(pcb: ProcessControlBlock) -> None:
+        pending = [self._get_process(pid)]
+        while pending:
+            pcb = pending.pop()
             ordered.append(self._snapshot(pcb))
-            for child_pid in sorted(pcb.child_pids):
+            for child_pid in sorted(pcb.child_pids, reverse=True):
                 child = self._processes.get(child_pid)
                 if child is not None:
-                    visit(child)
-
-        visit(self._get_process(pid))
+                    pending.append(child)
         return tuple(ordered)
 
     async def reap(self, pid: int) -> ProcessResult:
@@ -571,6 +579,7 @@ class ProcessKernel:
     def _schedule(self, pcb: ProcessControlBlock) -> None:
         if (
             self._state is not KernelState.RUNNING
+            or pcb.decision is not None
             or pcb.state is not ProcessState.READY
             or (pcb.runner is not None and not pcb.runner.done())
         ):
@@ -581,35 +590,30 @@ class ProcessKernel:
         task.add_done_callback(self._tasks.discard)
 
     async def _activate(self, pcb: ProcessControlBlock) -> None:
-        counted = False
         try:
             async with self._slots:
-                if pcb.state is not ProcessState.READY or not pcb.mailbox:
+                if (
+                    pcb.decision is not None
+                    or pcb.state is not ProcessState.READY
+                    or not pcb.mailbox
+                ):
                     return
                 event = pcb.mailbox.popleft()
                 pcb.state = ProcessState.RUNNING
                 self._running_count += 1
                 self.peak_running = max(self.peak_running, self._running_count)
-                counted = True
                 try:
                     action = await pcb.program.handle(pcb.context, event)
-                except asyncio.CancelledError:
-                    if pcb.state is ProcessState.CANCELLING:
-                        return
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    await self._fail_abnormally(pcb, exc)
-                    return
-                if pcb.state is ProcessState.RUNNING:
-                    await self._apply_action(pcb, action)
+                finally:
+                    self._running_count -= 1
+            if pcb.decision is None and pcb.state is ProcessState.RUNNING:
+                await self._apply_action(pcb, action)
         except asyncio.CancelledError:
-            if pcb.state is not ProcessState.CANCELLING:
+            if pcb.decision is None:
                 await self._fail_abnormally(pcb, RuntimeError("runner cancelled"))
         except Exception as exc:  # noqa: BLE001
             await self._fail_abnormally(pcb, exc)
         finally:
-            if counted:
-                self._running_count -= 1
             pcb.runner = None
             if pcb.state is ProcessState.READY:
                 self._schedule(pcb)
@@ -967,24 +971,31 @@ class ProcessKernel:
                 raise OperationDenied(
                     "cancel target is not owned and requires process.cancel authority"
                 )
-            selected = (
-                self._subtree_pids(target)
-                if action.mode is CancelMode.TREE
-                else {target.pid}
-            )
-            if caller.pid in selected:
-                await self.cancel(target.pid, mode=action.mode, reason=action.reason)
-                return
-            result = await self.cancel(
-                target.pid, mode=action.mode, reason=action.reason
-            )
+            self._request_cancel(target, mode=action.mode, reason=action.reason)
         except (ProcessNotFound, InvalidKernelState, OperationDenied) as exc:
             self._reject(caller, "cancel", exc)
             return
-        caller.mailbox.append(
-            OperationCompleted("cancel", (action.target_pid,), result=result)
-        )
-        caller.state = ProcessState.READY
+        if caller.decision is not None:
+            return
+        caller.state = ProcessState.WAITING
+        caller.operation_completion = target.completion
+
+        def completed(completion: asyncio.Future[ProcessResult]) -> None:
+            if caller.decision is not None or caller.operation_completion is not completion:
+                return
+            caller.operation_completion = None
+            caller.operation_callback = None
+            caller.mailbox.append(
+                OperationCompleted("cancel", (target.pid,), result=completion.result())
+            )
+            caller.state = ProcessState.READY
+            self._schedule(caller)
+
+        caller.operation_callback = completed
+        if target.completion.done():
+            completed(target.completion)
+        else:
+            target.completion.add_done_callback(completed)
 
     def _apply_detach(self, caller: ProcessControlBlock, action: Detach) -> None:
         child = self._processes.get(action.child_pid)
@@ -1055,6 +1066,7 @@ class ProcessKernel:
         if (
             target.state is ProcessState.WAITING
             and target.waiting_for is None
+            and target.operation_completion is None
             and target.pending_resource_invocation_id is None
         ):
             target.state = ProcessState.READY
@@ -1085,47 +1097,132 @@ class ProcessKernel:
                 pcb, state.value.lower(), OperationDenied("active attached children")
             )
         else:
-            self._finish(pcb, state, result=result, error=error)
+            if self._commit_decision(pcb, state, result=result, error=error):
+                self._publish_result(pcb)
+
+    def _commit_decision(
+        self,
+        pcb: ProcessControlBlock,
+        state: ProcessState,
+        *,
+        result: Any = None,
+        error: ProcessError | None = None,
+    ) -> bool:
+        """Commit one validated, frozen winner in the event-loop thread."""
+
+        if pcb.decision is not None or pcb.result is not None:
+            return False
+        frozen = freeze_public_value(result)
+        if state not in COMPLETION_STATES or (
+            state is ProcessState.FAILED and error is None
+        ):
+            raise InvalidKernelState("invalid terminal decision")
+        pcb.decision = TerminalDecision(state, datetime.now(UTC), frozen, error)
+        pcb.state = (
+            ProcessState.CANCELLING
+            if state is ProcessState.CANCELLED
+            else ProcessState.FAILING
+            if state is ProcessState.FAILED
+            else pcb.state
+        )
+        if pcb.operation_completion is not None and pcb.operation_callback is not None:
+            pcb.operation_completion.remove_done_callback(pcb.operation_callback)
+        pcb.operation_completion = pcb.operation_callback = None
+        return True
+
+    def _start_finalizer(
+        self,
+        pcb: ProcessControlBlock,
+        *,
+        predecessor: ProcessControlBlock | None = None,
+    ) -> None:
+        children = tuple(
+            self._processes[pid]
+            for pid in sorted(pcb.child_pids, reverse=True)
+            if pid in self._processes
+        )
+        task = asyncio.create_task(self._finalize(pcb, children, predecessor))
+        pcb.finalizer_task = task
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._observe_task)
+        self._suppress_pending_resource(pcb)
+
+    async def _await_finalization(self, pcb: ProcessControlBlock) -> ProcessResult:
+        """Supervise internal waits without turning task faults into Process results."""
+
+        if pcb.result is not None:
+            return pcb.result
+        task = pcb.finalizer_task
+        if task is None:
+            raise InvalidKernelState(f"process {pcb.pid} has no finalizer")
+        observed: set[asyncio.Future[Any]] = {pcb.completion, task}
+        await asyncio.wait(observed, return_when=asyncio.FIRST_COMPLETED)
+        if task.done():
+            if task.cancelled():
+                raise InvalidKernelState(f"process {pcb.pid} finalizer cancelled")
+            if (error := task.exception()) is not None:
+                raise InvalidKernelState(f"process {pcb.pid} finalizer failed") from error
+        if pcb.result is None:
+            raise InvalidKernelState(f"process {pcb.pid} finalizer omitted completion")
+        return pcb.result
+
+    async def _finalize(
+        self,
+        pcb: ProcessControlBlock,
+        children: tuple[ProcessControlBlock, ...],
+        predecessor: ProcessControlBlock | None,
+    ) -> None:
+        decision = pcb.decision
+        assert decision is not None
+        diagnostics: dict[str, Any] = {}
+        if predecessor is not None:
+            await self._await_finalization(predecessor)
+        for child in children:
+            if decision.state is ProcessState.FAILED:
+                await self._cancel_tree_after_failures(
+                    child, reason=f"owner {pcb.pid} failed"
+                )
+            else:
+                await self._await_finalization(child)
+        if decision.state is ProcessState.CANCELLED:
+            assert decision.error is not None
+            diagnostics = await self._complete_cancellation(pcb, decision.error.message)
+        self._publish_result(pcb, diagnostics=diagnostics)
 
     async def _fail_abnormally(
         self, pcb: ProcessControlBlock, exc: BaseException
     ) -> None:
-        async with self._decision_lock:
-            if pcb.state in TERMINAL_STATES or pcb.state is ProcessState.CANCELLING:
-                return
-            if pcb.state is not ProcessState.FAILING:
-                pcb.state = ProcessState.FAILING
-        for child_pid in sorted(self._active_children(pcb), reverse=True):
-            child = self._processes[child_pid]
-            await self._cancel_tree_after_failures(
-                child, reason=f"owner {pcb.pid} failed"
-            )
-        self._finish(
-            pcb,
-            ProcessState.FAILED,
-            error=self._normalize_error(exc, ErrorOrigin.PROGRAM),
-        )
+        if pcb.decision is not None:
+            return
+        if self._commit_decision(
+            pcb, ProcessState.FAILED, error=self._normalize_error(exc, ErrorOrigin.PROGRAM)
+        ):
+            self._start_finalizer(pcb)
 
     async def _cancel_tree_after_failures(
         self, root: ProcessControlBlock, *, reason: str
     ) -> None:
         while True:
             try:
-                await self.cancel(root.pid, mode=CancelMode.TREE, reason=reason)
-                return
+                self._request_cancel(root, mode=CancelMode.TREE, reason=reason)
             except OperationDenied:
                 failing = [
-                    item.completion
+                    item
                     for item in self._cancellation_postorder(root)
                     if item.state is ProcessState.FAILING
                 ]
                 if not failing:
                     raise
-                await asyncio.gather(*(asyncio.shield(future) for future in failing))
+                for item in failing:
+                    await self._await_finalization(item)
+            else:
+                await self._await_finalization(root)
+                return
 
     async def _complete_cancellation(
         self, pcb: ProcessControlBlock, reason: str
-    ) -> None:
+    ) -> dict[str, Any]:
         diagnostics: dict[str, Any] = {}
         runner = pcb.runner
         if (
@@ -1139,6 +1236,10 @@ class ProcessKernel:
                 self._retain_draining_task(runner)
 
         stop_task = asyncio.create_task(pcb.program.stop(reason))
+        pcb.stop_task = stop_task
+        self._tasks.add(stop_task)
+        stop_task.add_done_callback(self._tasks.discard)
+        stop_task.add_done_callback(self._observe_task)
         if not await self._wait_bounded(stop_task):
             diagnostics["stop_timeout"] = True
             stop_task.cancel()
@@ -1151,14 +1252,7 @@ class ProcessKernel:
             logger.warning(
                 "process cancellation cleanup failed: pid=%s", pcb.pid, exc_info=error
             )
-        self._finish(
-            pcb,
-            ProcessState.CANCELLED,
-            error=ProcessError(
-                code="process_cancelled", message=reason, origin=ErrorOrigin.KERNEL
-            ),
-            diagnostics=diagnostics,
-        )
+        return diagnostics
 
     def _suppress_pending_resource(self, pcb: ProcessControlBlock) -> None:
         invocation_id = pcb.pending_resource_invocation_id
@@ -1200,29 +1294,28 @@ class ProcessKernel:
                 if not task.cancelled():
                     task.exception()
 
-    def _finish(
+    def _publish_result(
         self,
         pcb: ProcessControlBlock,
-        state: ProcessState,
         *,
-        result: Any = None,
-        error: ProcessError | None = None,
         diagnostics: dict[str, Any] | None = None,
     ) -> None:
-        if pcb.state in TERMINAL_STATES:
+        if pcb.result is not None:
             return
+        decision = pcb.decision
+        assert decision is not None
         process_result = ProcessResult(
             pid=pcb.pid,
             image_id=pcb.context.image_id,
             image_version=pcb.context.image_version,
-            state=state,
+            state=decision.state,
             started_at=pcb.started_at,
             completed_at=datetime.now(UTC),
-            result=result,
-            error=error,
+            result=decision.result,
+            error=decision.error,
             diagnostics=diagnostics or {},
         )
-        pcb.state, pcb.result = state, process_result
+        pcb.state, pcb.result = decision.state, process_result
         if not pcb.completion.done():
             pcb.completion.set_result(process_result)
         owner = (
@@ -1248,11 +1341,14 @@ class ProcessKernel:
         }
 
     def _subtree_pids(self, root: ProcessControlBlock) -> set[int]:
-        result = {root.pid}
-        for child_pid in root.child_pids:
-            child = self._processes.get(child_pid)
-            if child is not None:
-                result.update(self._subtree_pids(child))
+        result: set[int] = set()
+        pending = [root]
+        while pending:
+            pcb = pending.pop()
+            result.add(pcb.pid)
+            pending.extend(
+                self._processes[pid] for pid in pcb.child_pids if pid in self._processes
+            )
         return result
 
     def _cancellation_postorder(
@@ -1260,14 +1356,17 @@ class ProcessKernel:
     ) -> tuple[ProcessControlBlock, ...]:
         ordered: list[ProcessControlBlock] = []
 
-        def visit(pcb: ProcessControlBlock) -> None:
-            for child_pid in sorted(pcb.child_pids):
+        pending = [(root, False)]
+        while pending:
+            pcb, visited = pending.pop()
+            if visited:
+                ordered.append(pcb)
+                continue
+            pending.append((pcb, True))
+            for child_pid in sorted(pcb.child_pids, reverse=True):
                 child = self._processes.get(child_pid)
                 if child is not None and child.state not in COMPLETION_STATES:
-                    visit(child)
-            ordered.append(pcb)
-
-        visit(root)
+                    pending.append((child, False))
         return tuple(ordered)
 
     @staticmethod

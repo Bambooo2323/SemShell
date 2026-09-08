@@ -1,18 +1,18 @@
 # SemShell 生命周期整理与分阶段重构计划
 
-日期：2026-09-07。状态：实施范围已归纳，代码尚未按本计划改造。
+日期：2026-09-08。状态：第一、第二阶段已实现并通过验收；第三阶段设计部分收敛，尚未实现。
 
 ## 1. 结论与范围
 
 采纳“决定结果、执行清理、等待结果、回收记录、关闭运行时”职责分离的方向，
-分三个阶段推进：先修复局部竞争，再统一内部生命周期，最后单独评估公开契约变化。
-近期实施范围为第一、第二阶段；第三阶段是待决策项，不是前两阶段的完成条件。
+分三个阶段推进：先修复局部竞争，再统一内部生命周期，最后迁移公开契约。
+第一、第二阶段已经完成；第三阶段已有三项确认设计，剩余项目继续单独决策。
 
 本文面向 Python 参考内核。现行行为以 `docs/semantics.md` 为准，生产边界沿用
 `docs/reference-and-production.md`：本仓库提供可执行的语义证明，实际执行与隔离交给
 独立的 Linux／OCI runtime。保留 Process、Event、Action、Authority 和公开结果类型。
 
-本次只整理计划，不代表实现或验收完成。内部优化不自动授权改变公开行为；实现中发现
+实施与验收状态见文末记录。内部优化不自动授权改变公开行为；实现中发现
 无法兼容的地方，应归入第三阶段并说明具体影响。
 
 ## 2. 问题依据
@@ -39,10 +39,12 @@
 ### 3.1 共享 shutdown 与稳定目标引用
 
 Kernel 持有唯一 `_shutdown_task`。首次 stop 在受控且不含 await 的提交步骤中关闭
-admission、进入 STOPPING、保存根 PCB 引用并登记任务；其他 stop 调用等待同一任务的
+admission、进入 STOPPING、保存目标 PCB 引用并登记任务；其他 stop 调用等待同一任务的
 shield 视图。取消任一等待者不得取消已提交的 shutdown。
 
-根集合包括 detached 根。清理辅助路径使用已解析的 PCB／completion，避免等待后重新
+目标集合包括 detached 根及当时的 attached 子进程，按根优先顺序清理。保留全部目标
+是为了覆盖已运行的 activation 在停机期间执行 Detach 的情况，不改变 Detach 资格。
+清理辅助路径使用已解析的 PCB／completion，避免等待后重新
 依赖 PID 表项；只对已知终结的对象跳过清理，不把任意 ProcessNotFound 解释为成功。
 第一阶段保留现行子树取消、FAILING 拒绝和清理顺序。
 
@@ -109,6 +111,10 @@ finalizer 负责取消 runner／待执行资源、抑制晚到事件、执行必
 child completion，再发布结果。owner 只等待 child，child 不等待 owner。清理不占
 activation semaphore，hook 最多调用一次；hook 超时或抛错只追加诊断，不改终态胜者。
 
+当前实现保留 TREE 的串行后序清理：新 finalizer 记录前一已选节点的稳定引用，
+先等该节点，再清理自身。依赖只沿既定后序向前，不引入 child 等待 owner。
+单次 TREE 的清理时间上界随成员数量增长。
+
 Cancel Action 的完成通知由 Kernel 持有。调用者仍可继续运行时，登记显式 completion
 依赖并进入 WAITING；已有 decision 时不登记依赖、不投递完成通知。这包括自我取消和
 经授权取消包含自身的祖先 TREE，必须避免 runner 与 finalizer 双向等待。
@@ -128,31 +134,124 @@ Kernel 必须收集 finalizer 异常。finalizer 意外退出时，监督路径�
 完成条件：所有终止路径只有一个 decision 和一个结果发布点；清理独立于请求者及执行槽；
 竞争、self-cancel、异常清理和超时用例通过，旧公开契约保持成立。
 
-## 5. 第三阶段：单独评估契约变化
+## 5. 第三阶段：已收敛设计与剩余决策
 
-以下是设计候选，不随前两阶段实施。每项须说明现行行为、目标行为、调用方影响、
-错误语义和验收用例，再同步规范与实现；没有必要证据时可以保持现状。
+第三阶段改变公开契约，必须在实现前同步 `docs/semantics.md`、Control 协议及类型定义。
+本节记录已经确认的设计，不表示当前代码已经具备相应行为。
 
-| 候选变化 | 待决策内容 |
+### 5.1 Cancel 统一为 ownership 级联
+
+公开取消不再让调用者选择 SELF 或 TREE。`cancel(pid)` 固定取消目标及其全部 attached
+后代；需要独立存活的 child 必须在取消提交前完成 Detach。Process 只拥有并直接管理
+自己的 child，Kernel 沿直接 ownership 边迭代收集完整后代并负责清理，不要求 Process
+查询或编排整棵树。
+
+取消范围在一个不含 await 的提交步骤中完成校验、收集稳定引用并封闭。该步骤与 Spawn、
+Detach 的同步提交顺序决定范围：Detach 先提交则 child 已成为独立根；取消先提交则该
+child 已进入范围，后续 Spawn 和 Detach 拒绝。detached 根仍由 Kernel shutdown 管理。
+
+范围中已有 FAILED、FAILING、CANCELLED 或其他终态决定的成员保留原决定，其余成员提交
+CANCELLED；某个成员已失败不能使整次级联取消拒绝。Kernel 仍按 child 先于 owner 的
+方向确认完成，ProcessResult 各自保存实际胜者。现有 `CancelMode.SELF/TREE` 进入兼容性
+迁移：先标记弃用并把两者归一为级联语义，再在下一次明确破坏性版本移除参数和枚举。
+
+### 5.2 Pause 是正交的调度状态
+
+pause 不加入 ProcessState 主状态机，而是在 PCB 上增加独立调度状态：
+
+```python
+class SchedulingState(StrEnum):
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+```
+
+Process 同时保留 `READY/RUNNING/WAITING/terminal` 生命周期状态和 `ACTIVE/PAUSED` 调度
+状态。pause 只禁止创建新的 activation，不回退、不重算底层状态，也不取消当前工作。
+
+- READY 或 WAITING 时 pause 立即提交。
+- RUNNING 时立即把调度状态改为 PAUSED；当前 `handle()` 和返回的 Action 正常完成提交，
+  但不启动下一次 activation。Exit 或 Fail 仍可直接进入终态。
+- mailbox 在暂停期间继续按现行规则接收 Event。普通消息保持 FIFO；Resource 和 child
+  completion 保留既有 continuation 优先级，pause 不重新定义事件顺序。
+- Resource、child 和等待目标继续推进，底层 WAITING 可以因 completion 变为 READY，
+  scheduler 因 PAUSED 不执行它。
+- resume 只恢复 ACTIVE；若底层状态已经是 READY，立即调用 scheduler，否则继续等待。
+- cancel 和 shutdown 可以直接终止暂停中的 Process。
+
+参考内核第一版允许暂停期间继续接收普通 IPC 和 console input，沿用当前无界 mailbox；
+文档明确这是内存参考实现限制。生产 runtime 必须定义队列容量和背压。第一版 pause
+只作用于指定 Process，不隐式传播给 child，不暂停正在执行的 Resource，也不提供回滚。
+
+Control 增加类型化 `PauseProcess`／`ResumeProcess`，分别要求
+`control.process.pause`／`control.process.resume` Authority。第一版只提供 Host Control
+入口，不新增 guest 暂停其他 Process 的 Action。边界式 pause 对所有 Process 可用，
+不要求 image 声明能力。长时间不返回的 `handle()` 无法被立即冻结；需要
+快速响应的程序应拆分为短 activation。协作式 token、显式 checkpoint 和 durable resume
+属于后续能力，不纳入第三阶段。
+
+### 5.3 Interrupt 是 Control 请求的观察状态
+
+interrupt 只作用于 ControlRequest，不修改 ProcessResult，不隐式转换为 pause 或 cancel。
+Shell Ctrl+C、session close、客户端 deadline、排队超时和上层取消 token 复用同一提交
+入口，并记录结构化 source 和 reason。Kernel Process scheduler 不自动产生 interrupt。
+
+一个 Request 同时保留执行状态和观察状态：
+
+```python
+class RequestExecutionState(StrEnum):
+    ADMITTED = "ADMITTED"
+    QUEUED = "QUEUED"
+    EXECUTING = "EXECUTING"
+    SUCCEEDED = "SUCCEEDED"
+    REJECTED = "REJECTED"
+    SKIPPED = "SKIPPED"
+
+class RequestObservationState(StrEnum):
+    OPEN = "OPEN"
+    REPLIED = "REPLIED"
+    INTERRUPTED = "INTERRUPTED"
+```
+
+`QUEUED -> EXECUTING` 是 mutation 的不可回退边界。Gateway 取得 mutation slot 后，
+在同一个不含 await 的受控步骤中检查 observation、提交 EXECUTING，然后立即调用 Kernel：
+
+- interrupt 先赢：execution 进入 SKIPPED，提交唯一 INTERRUPTED reply，不调用 Kernel。
+- EXECUTING 先赢：interrupt 只把 observation 改为 INTERRUPTED，Kernel 操作继续。
+- 后台操作完成后，execution 进入 SUCCEEDED 或 REJECTED；若 observation 已 INTERRUPTED，
+  只追加一条 LATE_SUCCEEDED 或 LATE_REJECTED，不产生第二个 reply。
+
+只读观察被 interrupt 后可以取消其 handler；已 shield 的 Process completion 和目标 Process
+不受影响。`WaitProcess.timeout` 仍是操作自身的 timeout rejection，不是 interrupt；Process
+运行期限使用独立 cancel/deadline 机制。Control 客户端 deadline 和 mutation queue timeout
+才进入 INTERRUPTED，其中 queue timeout 必须发生在 EXECUTING 之前。
+
+reply 与终态 audit 继续通过唯一 `commit_reply` 提交。实际执行结果使用独立
+operation outcome 记录，使 `EXECUTING + INTERRUPTED` 之后仍能表达真实结果。Session
+close 同步关闭 admission，中断所有 OPEN observation，跳过尚未执行的 queued mutation，
+取消无副作用的观察 handler，并保留已 EXECUTING 的 mutation task。
+
+### 5.4 尚待决定的项目
+
+以下内容尚未收敛，不能与前三项一起默认实施：
+
+| 项目 | 待决策内容 |
 | --- | --- |
-| TREE 遇到 FAILING | 是否从整体拒绝改为保留失败成员、继续取消其他成员；何时替换 `_cancel_tree_after_failures` |
-| 一次封闭子树 | 父异常或 shutdown 是否立即对整个范围提交决定；与 Spawn／Detach 的先后顺序及清理并发上界 |
-| 公开过渡状态 | 是否调整 CANCELLING／FAILING 的可见性、含义和快照字段；第二阶段不删除这些状态 |
-| wait/reap 扩展 | 是否改变活动 wait 对 reap 的限制或新增观察能力；内部稳定引用不要求改变资格条件 |
-| queued interruption | 取得 mutation 配额前中断是否阻止 Kernel 调用；取得配额后如何同步提交 EXECUTING 边界 |
-| Control 关闭与审计扩展 | 是否需要共享 close task、独立 operation_outcome，以及相应记录保留规则 |
+| 公开过渡状态 | 是否调整 CANCELLING／FAILING 的可见性、含义和快照字段 |
+| wait/reap 扩展 | 是否改变活动 wait 对 reap 的限制或新增观察能力 |
+| Control close task | 多个 close 是否共享 Gateway 持有的任务，以及关闭完成的准确边界 |
 
-TREE 如采用逐成员决定，应在无 await 的步骤中校验并收集稳定引用，保留已有胜者，
-封闭后禁止新建 attached／detached 后代及 ownership 变更。Detach 先提交则脱离范围，
-TREE 先提交则拒绝 Detach；detached 根仍由 shutdown 管理。兄弟可并发清理，若串行则
-须按节点数给出总时间上界，不能把单 hook 超时视为整棵树的时间上界。
+finalizer 自动恢复、自动 reaper、结果持久化、生产 supervisor 和容器执行器继续暂缓。
+批量 spawn 的额外事务重构也不并入本阶段；保留已有 metadata 失败不消耗 PID 的回归
+保护，新增问题单独提供证据后处理。
 
-queued interruption 如变更，应明确排队与执行的分界：取得配额、检查未中断、同步
-标记执行开始并调用 Kernel；此后中断只结束观察，operation task 由 Gateway 持有。
+### 5.5 第三阶段实施顺序
 
-finalizer 自动恢复、自动 reaper、结果持久化、生产 supervisor 和容器执行器暂缓，
-不作为第三阶段默认交付。批量 spawn 的额外事务重构也不并入本计划；保留已有 metadata
-失败不消耗 PID 的回归保护，新增问题单独提供证据后处理。
+1. 先更新规范和公开类型，写明兼容期以及每个竞争的线性化点。
+2. 将 cancel 归一为 ownership 级联，并实现与 Spawn／Detach 的原子范围封闭。
+3. 增加正交 SchedulingState、PauseProcess 和 ResumeProcess。
+4. 拆分 RequestExecutionState 与 RequestObservationState，落实 queued interrupt 边界。
+5. 增加 operation outcome 审计并迁移 Control close。
+6. 完成定向竞争测试后，运行全套 pytest、Ruff 和 strict mypy。
 
 ## 6. 修改落点与验收
 
@@ -160,7 +259,7 @@ finalizer 自动恢复、自动 reaper、结果持久化、生产 supervisor 和
 | --- | --- | --- |
 | 第一阶段 | `semshell/kernel/kernel.py`、`semshell/control/session.py`、`semshell/control/gateway.py` | 共享 stop、稳定引用、迭代遍历、唯一 reply/audit |
 | 第二阶段 | `semshell/kernel/_runtime.py`、`semshell/kernel/kernel.py` | TerminalDecision、统一 finalizer、completion 依赖和故障监督 |
-| 第三阶段 | 受影响实现、`docs/semantics.md`、`devdoc/control_protocol_semantics.md` 等契约文件 | 逐项迁移公开行为；按需更新资源契约与代码导览 |
+| 第三阶段 | Kernel Process/operation 类型、Control request/session/gateway、公开规范 | 级联 cancel、正交 pause、双维 interrupt；其他候选逐项决策 |
 
 用 Event／Future 栅栏固定竞争顺序，避免依靠长 sleep 或反复运行碰概率。
 
@@ -178,8 +277,16 @@ finalizer 自动恢复、自动 reaper、结果持久化、生产 supervisor 和
 | 二 | max_running=1、hook 抛错或超时 | 清理不占执行槽，hook 最多一次，晚到 Action 不复活进程 |
 | 二 | finalizer 内部故障 | shutdown 明确报错并保持 STOPPING，不伪造结果，不隐式重试 hook |
 | 二 | TREE 含 FAILING、Exit 有活动子节点 | 前两阶段仍满足现行拒绝规则 |
-| 三 | TREE 范围与 Spawn／Detach 竞争 | 仅在新契约采纳后验证原子封闭和逐成员保留胜者 |
-| 三 | 排队／执行后 interrupt | 仅在新契约采纳后验证前者不调用 Kernel、后者不回滚 |
+| 三 | cancel 与 Spawn／Detach 竞争 | 原子提交顺序决定范围；级联不因已有失败成员整体拒绝 |
+| 三 | CancelMode 兼容期 | SELF 和 TREE 都执行 ownership 级联，并发出稳定弃用提示；后续版本移除 |
+| 三 | READY／WAITING pause/resume | pause 不改底层状态；resume 后 READY 恢复调度，WAITING 继续等待 |
+| 三 | RUNNING 时 pause | 当前 Action 正常提交，后续 activation 被抑制；Exit/Fail 可直接终结 |
+| 三 | 暂停期间的事件 | 普通消息保持 FIFO，continuation 保持既有优先级，恢复后无丢失或重复 |
+| 三 | PAUSED 与 cancel/shutdown | 暂停不能阻止终态决定、清理或 Kernel 停机 |
+| 三 | queued mutation interrupt | interrupt 先赢则 SKIPPED 且不调用 Kernel；EXECUTING 先赢则操作继续 |
+| 三 | 执行后的 interrupt | 只有一个 INTERRUPTED reply，实际结果最多一条 late operation outcome |
+| 三 | interrupt 来源与 timeout | source/reason 冻结；WaitProcess.timeout、client deadline、queue timeout 不混用 |
+| 三 | Session close | queued mutation 跳过、只读观察取消、已执行 mutation 继续且可审计 |
 
 每阶段先运行受影响的定向用例。近期第一、第二阶段完成后运行一次全套 pytest、Ruff、
 strict mypy；只有新改动、新失败或未解决疑点才扩大或重复验证。第三阶段若实施，按其
@@ -203,7 +310,7 @@ Linux 对照用于解释边界，不决定 Python 内部实现。SemShell Proces
 Python 无法强停吞取消或阻塞事件循环的代码，超时以事件循环可继续运行为前提。
 逻辑终态不保证 Host 副作用停止；更强的执行边界由生产 runtime 提供。
 
-原提案列出以下资料；本次为文档归纳，未重新联网核验，也未做 Linux 实机测试：
+以下参考资料沿用原提案；本次实现期间未重新联网核验，也未做 Linux 实机测试：
 
 - [_exit(2)](https://man7.org/linux/man-pages/man2/_exit.2.html)
 - [wait(2)](https://man7.org/linux/man-pages/man2/wait.2.html)
@@ -211,3 +318,18 @@ Python 无法强停吞取消或阻塞事件循环的代码，超时以事件循�
 - [pthread_detach(3)](https://man7.org/linux/man-pages/man3/pthread_detach.3.html)
 - [pidfd_open(2)](https://man7.org/linux/man-pages/man2/pidfd_open.2.html)
 - [cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html)
+
+## 8. 实施记录
+
+2026-09-08：第一、第二阶段已实现。Kernel 使用共享 shutdown、稳定目标引用、
+迭代遍历、TerminalDecision 和统一 finalizer；Control 将审计准备与一次性回复提交
+连接起来，移除了 was_replied 快照推断。未改变 TREE 的 FAILING 拒绝规则、reap 资格
+或排队 mutation 的 interruption 行为。第三阶段已收敛级联 cancel、正交 pause 和双维
+interrupt 的设计，但尚未实现；自动恢复仍不在范围内。
+
+验收证据：全套 pytest 149 项通过，Ruff 通过，strict mypy 检查 54 个源文件通过。
+新增用例覆盖并发 stop、停机调用者取消后独立完成、wait/reap 与 stop/reap 交错、
+停机期间 Detach、1,100 层子树、单执行槽上的异常及取消清理、授权后代取消祖先、
+晚到 Action、结果冻结失败，以及 finalizer
+抛错／被取消／遗漏 completion。Control 用例覆盖 close 与成功回复交错、晚到 mutation
+和审计准备失败。`git diff --check` 通过。

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
@@ -77,6 +77,9 @@ class RequestHandle:
         self._reply: asyncio.Future[ControlReply] = (
             asyncio.get_running_loop().create_future()
         )
+        self._prepare_reply_commit: (
+            Callable[[ControlReply], Callable[[], None]] | None
+        ) = None
 
     @property
     def request_id(self) -> RequestId:
@@ -98,6 +101,22 @@ class RequestHandle:
     @property
     def is_replied(self) -> bool:
         return self._state is RequestState.REPLIED
+
+    def bind_reply_commit(
+        self, callback: Callable[[ControlReply], Callable[[], None]]
+    ) -> None:
+        """Bind the gateway's terminal-audit preparation hook once.
+
+        The hook prepares a non-yielding audit append before the reply state is
+        changed.  A ``ControlSession`` has no audit sink of its own; the
+        gateway binds this controlled hook before dispatch.
+        """
+
+        if self._prepare_reply_commit is not None:
+            raise RuntimeError("request reply commit hook is already bound")
+        if self._state is RequestState.REPLIED:
+            raise RuntimeError("cannot bind reply commit hook after a reply")
+        self._prepare_reply_commit = callback
 
     async def mark_dispatched(self) -> bool:
         """Move ADMITTED to DISPATCHED unless a terminal reply already won."""
@@ -140,25 +159,24 @@ class RequestHandle:
 
         if not reason:
             raise ValueError("interruption reason must not be empty")
+        reply = ControlReply(
+            request_id=self.request_id,
+            operation=self.operation_name,
+            status=ReplyStatus.INTERRUPTED,
+            error=ControlError(
+                code="gateway.interrupted",
+                message=reason,
+                origin=ControlErrorOrigin.GATEWAY,
+                retryable=True,
+            ),
+        )
         async with self._lock:
-            self._interrupted = True
             if self._state is RequestState.REPLIED:
+                self._interrupted = True
                 return False
-            self._state = RequestState.REPLIED
-            self._reply.set_result(
-                ControlReply(
-                    request_id=self.request_id,
-                    operation=self.operation_name,
-                    status=ReplyStatus.INTERRUPTED,
-                    error=ControlError(
-                        code="gateway.interrupted",
-                        message=reason,
-                        origin=ControlErrorOrigin.GATEWAY,
-                        retryable=True,
-                    ),
-                )
-            )
-            return True
+            commit_audit = self._prepare_commit(reply)
+            self._interrupted = True
+            return self._commit_locked(reply, commit_audit)
 
     async def wait_reply(self) -> ControlReply:
         """Wait for the already unique terminal reply without cancelling it."""
@@ -169,9 +187,24 @@ class RequestHandle:
         async with self._lock:
             if self._state is RequestState.REPLIED:
                 return False
-            self._state = RequestState.REPLIED
-            self._reply.set_result(reply)
-            return True
+            commit_audit = self._prepare_commit(reply)
+            return self._commit_locked(reply, commit_audit)
+
+    def _prepare_commit(self, reply: ControlReply) -> Callable[[], None] | None:
+        if self._prepare_reply_commit is None:
+            return None
+        return self._prepare_reply_commit(reply)
+
+    def _commit_locked(
+        self, reply: ControlReply, commit_audit: Callable[[], None] | None
+    ) -> bool:
+        """Commit reply and audit without yielding while the request lock is held."""
+
+        if commit_audit is not None:
+            commit_audit()
+        self._state = RequestState.REPLIED
+        self._reply.set_result(reply)
+        return True
 
 
 class ControlSession:

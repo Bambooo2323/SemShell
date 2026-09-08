@@ -144,7 +144,8 @@ This package is the trusted semantic execution core.
   and DetachProcess where external identity is insufficient.
 - `errors.py` contains stable Kernel exception categories used internally and
   normalized by ControlGateway.
-- `_runtime.py` contains the mutable ProcessControlBlock and ResourceTaskRecord.
+- `_runtime.py` contains the mutable ProcessControlBlock and ResourceTaskRecord,
+  plus the immutable TerminalDecision and Kernel-owned cleanup task references.
   They are Kernel-owned implementation state and must never be exposed to guest
   programs, Control adapters, or CLI rendering.
 - `kernel.py` implements ProcessKernel.
@@ -177,8 +178,10 @@ The main private paths in `kernel.py` are grouped by responsibility:
   authenticated resource lifecycle without filesystem-specific branches;
 - `_apply_spawn()`, `_apply_wait()`, `_apply_cancel()`, and `_apply_detach()`
   implement structured process operations;
-- `_complete_cancellation()`, `_fail_abnormally()`, and `_finish()` resolve
-  terminal lifecycle decisions;
+- `_commit_decision()` freezes the unique terminal decision;
+- `_finalize()` owns cancellation and abnormal cleanup outside activation slots,
+  and `_publish_result()` publishes the sole ProcessResult;
+- `_shutdown()` owns shared shutdown using stable Process references;
 - `_snapshot()` is the only ProcessControlBlock-to-public-view conversion.
 
 ### 4.2 `semshell/software/`
@@ -434,6 +437,8 @@ is audited without changing the earlier INTERRUPTED reply.
 
 - `test_kernel.py` covers scheduling, lifecycle, IPC, ownership, waiting,
   cancellation, and inspection.
+- `test_kernel_lifecycle.py` covers shutdown races, deep trees, terminal
+  competition, cleanup ownership, and finalizer fault supervision.
 - `test_public_types.py` covers public value construction and shared operation
   types.
 - `test_catalog.py` covers registration, resolution, ambiguity, and in-use

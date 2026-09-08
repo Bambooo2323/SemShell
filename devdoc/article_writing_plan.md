@@ -1,5 +1,7 @@
 # SemShell Article Writing Plan
 
+中文部分为用户注释。
+
 ## 1. Writing decision
 
 The next deliverable is a concise English technical essay supported by this
