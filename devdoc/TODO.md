@@ -1,7 +1,8 @@
 # SemShell TODO
 
 本文档将 [`llm_cli_os_design_draft.md`](./llm_cli_os_design_draft.md) 转换为可执行的实现路线。
-第一阶段的目标不是构建完整 OS 或通用 Agent 框架，而是验证以下命题：
+本仓库的最终目标是完成技术架构证明和可复现演示，不是构建完整 OS、生产 runtime
+或通用 Agent 框架。需要验证的命题是：
 
 1. LLM-backed program、Tool、Coordinator、Memory 和普通程序在 Kernel 中都是平等的 Process。
 2. HumanShell、RuleShell 和 LLMShell 可以通过同一套结构化接口操作 Kernel。
@@ -297,34 +298,90 @@ production runtime implementation.
 - [x] Freeze physical pruning. Require a recoverable tag/branch and an explicit
   file-level removal list if that decision is revisited.
 
-The default policy is maintenance-only: fix contradictions, broken proofs, and
-documentation drift, but do not add production transports, persistence,
-executors, streams, supervisors, or deployment systems here.
+The default policy is maintenance-only after the bounded lifecycle closure in
+Section 14. Until then, changes must map directly to its accepted semantics or
+the final architecture demonstration. Do not add production transports,
+persistence, executors, streams, supervisors, or deployment systems here.
 
-## 14. Next design deliverable
+## 14. Final lifecycle closure
 
-The remaining work in this repository is specification, not Python runtime
-implementation:
+生命周期重构的第一、第二阶段已经完成并通过全套验证。第三阶段只实现能够闭合参考模型、
+并能在架构演示中直接观察的语义；详细设计以
+[`lifecycle_rearchitecture.md`](lifecycle_rearchitecture.md) 为准。
 
-- [ ] Encode registration, Event, Action, and ProcessResult as versioned,
-  language-neutral wire schemas.
-- [ ] Encode logical Process, execution, container, and operating-system
-  identity fields and invariants.
-- [ ] Decide admission/create/persist/start crash-recovery ordering.
-- [ ] Decide structured worker-result versus conflicting runtime-exit
-  precedence.
-- [ ] Encode cancellation, late-message, channel-loss, and reconciliation
-  transition tables.
-- [ ] Specify versioned Authority-to-execution-profile compiler inputs,
-  outputs, enforcement failures, and audit fields.
-- [ ] Specify trusted resource-injection and credential-lifetime profiles.
-- [ ] Publish shared language-neutral conformance fixtures.
+- [ ] 将 `cancel(pid)` 收敛为唯一的 ownership 级联语义：Kernel 沿直接 ownership
+  边清理全部 attached 后代，保留各成员已有终态决定。
+- [ ] 在无 await 的提交步骤中封闭取消范围，明确与 Spawn／Detach 的先后顺序。
+- [ ] 对 `CancelMode.SELF/TREE` 提供兼容迁移，两者先归一为级联语义；移除留到明确的
+  破坏性版本，不为演示强制清理旧 API。
+- [ ] 增加与 ProcessState 正交的 `ACTIVE/PAUSED` 调度状态，以及 Host Control 的
+  `PauseProcess`／`ResumeProcess`。暂停只抑制 activation，mailbox、Resource 和 child
+  completion 继续按现有规则推进。
+- [ ] 将 ControlRequest 拆分为 execution state 与 observation state；把
+  `QUEUED -> EXECUTING` 定义为 mutation 的不可回退边界。
+- [ ] interrupt 在执行前将操作标为 SKIPPED，在执行后只结束观察；实际后台结果最多
+  追加一条 late outcome，不改变 ProcessResult。
+- [ ] 同步 `docs/semantics.md`、`devdoc/semantics.md`、Control 协议、公共类型和代码导览。
+- [ ] 用确定性栅栏覆盖 cancel/Spawn/Detach、pause/resume/mailbox、queued/executing
+  interrupt、session close 和审计唯一性；完成全套 pytest、Ruff、strict mypy。
 
-Completion criterion: a separate application repository can implement the
-contract with Docker Engine, containerd, or another OCI-compatible runtime
-without importing or replacing the Python ProcessKernel.
+以下事项不是功能完备的门槛：调整 CANCELLING／FAILING 的公开形式、扩展 wait/reap、
+共享 Control close task、durable checkpoint、finalizer 自动恢复。没有新的失败证据或
+演示需求时保持现状。
 
-## 15. Separate production-runtime roadmap
+完成条件：生命周期、暂停和 Control 中断各自有单一职责及确定性竞争结果；规范、实现、
+测试一致。完成后停止扩展 Kernel 功能，转入架构演示。
+
+## 15. Final Agent architecture demonstration
+
+第 9 节已经完成最小 Operator 等价性证明；本节将其整理成最终对外演示。目标是让读者
+直接看到 Process-centric Agent 结构的优势，而不是展示一个功能繁多
+的 CLI 或操作系统。这里的“优势”必须由仓库代码、运行输出和测试支持，不使用无法验证的
+性能、智能水平或生产可靠性主张。
+
+### 15.1 要证明的架构性质
+
+- [ ] 同一个任务由 HumanShell、RuleShell 和 fake LLMShell 执行时，Kernel、Action/Event
+  ABI、普通软件和资源边界保持不变，只替换 Operator ProcessImage。
+- [ ] LLM、工具型程序、Coordinator 和普通程序在 Kernel 中都是 Process；Kernel 不导入、
+  识别或分支处理 Agent、Tool、Planner、Memory、Human 或 LLM 角色。
+- [ ] Agent 的拆分、组合和替换通过 ProcessImage、Capability、Spawn、Wait 和 Message
+  表达；增加一个同契约 Operator 不修改 Kernel。
+- [ ] authority、ownership、等待关系、取消、暂停和失败结果都能从结构化快照及审计中
+  观察，而不是藏在 Prompt 或框架内部状态中。
+- [ ] Host Control、Console 输入、Resource bridge 和 Process IPC 的身份边界清晰，外部
+  客户端不能伪造 Process 来源。
+
+### 15.2 演示场景
+
+- [ ] 保留现有 `demo --operator human|rule|llm` 作为 60 秒主路径，并确保三种 Operator
+  对同一确定性 fan-out/fan-in 任务产生等价拓扑和结果。
+- [ ] 输出紧凑的结构化证据：Operator image、Process tree、每个节点的角色无关状态、
+  最终结果、关键 authority decision 和 Resource audit；避免输出内部 PCB 或 Python 对象。
+- [ ] 增加一个替换性场景：注册新的同契约 Operator image，只改 bootstrap/catalog 组装，
+  不改 Kernel 和 worker/coordinator。
+- [ ] 增加一个受控生命周期场景：展示 attached 后代级联取消、单 Process pause 后邮箱
+  缓存并 resume，以及 Control interrupt 不等于 Process cancel。
+- [ ] 增加一个边界拒绝场景：缺少 Authority 时 Resource 在 Host 调用前被拒绝，或者
+  ControlSession 无法伪造 Process IPC source PID。
+- [ ] 每个场景提供固定输入、预期关键输出和对应测试；默认使用 scripted backend，
+  不需要网络、API key、Docker 或人工时序操作。
+
+### 15.3 演示交付物
+
+- [ ] 在 README 提供一条 60 秒主命令和一条 5 分钟扩展演示路径。
+- [ ] 提供一份面向架构读者的说明，按“输入 → Operator 决策 → 普通 Process 协作 →
+  Kernel 可观察证据”解释完整流程。
+- [ ] 给出简短对照表，说明传统按 Agent/Tool 写 Kernel 分支的耦合点，以及本实现由哪些
+  可执行证据证明角色中立；只比较结构，不宣称未经测量的性能收益。
+- [ ] 保留机器可读输出，确保演示可由测试复现；可视化只作为同一结果的展示层。
+- [ ] 完成一次无上下文读者检查：读者应能从文档和输出回答“谁做了决策、Kernel 是否
+  识别 Agent、权限在哪里执行、替换 Operator 需要修改什么”。
+
+完成条件：新读者在不阅读 Kernel 实现的情况下，可以通过命令、输出和短文档验证上述
+架构性质；演示没有引入生产 transport、持久化、容器执行器或新的角色专用 Kernel 分支。
+
+## 16. Separate production-runtime boundary
 
 The following are intentionally not TODO items for this repository:
 
@@ -338,10 +395,11 @@ The following are intentionally not TODO items for this repository:
 - remote Catalog/package management and deployment orchestration;
 - optional FUSE views or other operating-system adapters.
 
-These belong to the separate Linux/OCI application repository after the worker
-and execution-profile specifications close.
+这些能力若需要落地，应进入独立的 Linux／OCI application repository。wire schema、
+container identity、crash recovery ordering、runtime exit precedence、execution-profile
+compiler 和生产资源注入规范也由该仓库按实际实现需求推进，不再作为本仓库完成条件。
 
-## 16. Article and documentation handoff
+## 17. Article and documentation handoff
 
 The writing brief is maintained in
 [`article_writing_plan.md`](article_writing_plan.md).
@@ -351,11 +409,12 @@ The writing brief is maintained in
   map.
 - [x] Separate repository-backed claims from comparisons requiring external
   primary sources.
-- [ ] Collect primary sources for ecosystem, Codex, OCI, and adjacent-runtime
-  comparisons.
-- [ ] Draft the English article section by section.
+- [ ] 在架构演示冻结后更新文章 evidence map，引用最终命令、输出和测试。
+- [ ] Collect primary sources for ecosystem, Codex, OCI, and adjacent-runtime comparisons.
+- [ ] Draft the English article section by section, centered on the verified
+  Agent architecture rather than an operating-system feature inventory.
 - [ ] Run context-free reader tests against the complete article.
 - [ ] Prepare the separate publication repository and copy only intentional
   release artifacts.
 
-No additional Python feature is a prerequisite for beginning the article.
+文章资料整理可以并行开始；最终实现证据以第 14 节闭合和第 15 节演示冻结后的结果为准。
