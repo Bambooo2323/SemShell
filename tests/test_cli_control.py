@@ -18,20 +18,22 @@ from semshell.cli.rendering import encode_public_value, render_reply
 from semshell.control import ControlGateway, ControlReply, ReplyStatus, RequestId
 from semshell.examples.control_runtime import ControlRuntime, build_control_runtime
 from semshell.kernel import (
-    CancelMode,
+    ProcessContext,
+    ProcessKernel,
+    Started,
+    Yield,
+)
+from semshell.kernel.operations import (
     CancelProcess,
     InspectProcess,
     InspectTree,
     ListImages,
     ListProcesses,
-    ProcessContext,
-    ProcessKernel,
     ReapProcess,
     SpawnProcesses,
-    Started,
     WaitProcess,
-    Yield,
 )
+from semshell.kernel.process import CancelMode
 from semshell.security import Authority, Permission, Principal
 from semshell.software.catalog import ProcessCatalog
 from semshell.software.image import ProcessImage, ProcessSpec

@@ -132,14 +132,15 @@ This package is the trusted semantic execution core.
 - `process.py` defines ProcessState, ownership/wait/cancel modes, ProcessError,
   ProcessContext, immutable terminal ProcessResult, and read-only
   ProcessSnapshot. These are the public lifecycle values.
-- `actions.py` defines values returned by guest programs: Spawn, Wait, Yield,
-  DiscoverImages, InvokeResource, Exit, and Fail. Send, Cancel, and Detach reuse
-  shared operation payloads. `ProcessAction` is their closed union.
+- `actions.py` owns the values returned by guest programs: Send, Spawn, Cancel,
+  Detach, Wait, Yield, DiscoverImages, InvokeResource, Exit, and Fail.
+  `ProcessAction` is their closed union. These types do not inherit from or
+  alias Host Control operations.
 - `events.py` defines mailbox values: Started, MessageReceived,
   ChildrenCompleted, operation continuations, ConsoleInput, catalog discovery,
   and resource completion/rejection. It also defines Message and MessageKind.
-- `operations.py` defines typed operation payloads shared across invocation
-  boundaries. `KernelOperation` includes trusted operations; the narrower
+- `operations.py` defines the temporary typed Host Control payloads.
+  `KernelOperation` includes trusted operations; the narrower
   `ExternalControlOperation` deliberately excludes RegisterImage, SendMessage,
   and DetachProcess where external identity is insufficient.
 - `errors.py` contains stable Kernel exception categories used internally and
@@ -149,7 +150,8 @@ This package is the trusted semantic execution core.
   They are Kernel-owned implementation state and must never be exposed to guest
   programs, Control adapters, or CLI rendering.
 - `kernel.py` implements ProcessKernel.
-- `__init__.py` is the public convenience export surface.
+- `__init__.py` is the guest/kernel convenience export surface. Control code
+  imports its distinct payloads directly from `kernel.operations`.
 
 The trusted-only exclusions have different reasons: RegisterImage carries an
 executable factory and belongs to Host bootstrap; SendMessage requires an
@@ -383,7 +385,7 @@ mailbox prevents progress.
 ### 5.2 Spawn and authority
 
 ```text
-Spawn / SpawnProcesses
+guest Spawn / Host Control SpawnProcesses
   -> Catalog exact or capability resolution
   -> execute ACL and Policy evaluation
   -> AuthorityDecisionRecord
@@ -394,6 +396,8 @@ Spawn / SpawnProcesses
 
 A ProcessSpec requests Authority but cannot grant it. Child authority is
 bounded by its caller unless trusted policy accepts configured approval.
+The two entry payloads are independent types; each boundary calls the trusted
+Kernel admission API with its own authenticated identity.
 
 ### 5.3 Resource invocation
 

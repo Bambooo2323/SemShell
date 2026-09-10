@@ -313,7 +313,7 @@ streams, supervisors, or deployment systems here.
 - [ ] Stage 0 — preserve the complete baseline and adopt the scope decision.
 - [x] Stage 1 — add HostAdmin, explicit report projection, and the extended
   offline demonstration.
-- [ ] Stage 2 — decouple guest Actions from Control operation types.
+- [x] Stage 2 — decouple guest Actions from Control operation types.
 - [ ] Stage 3 — reduce ownership, cancellation, Wait, Message, ProcessSpec,
   Catalog, and Policy semantics.
 - [ ] Stage 4 — remove the active Control REPL/package and local filesystem proof.

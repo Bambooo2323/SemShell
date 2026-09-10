@@ -5,30 +5,64 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 
-from semshell.kernel.events import ContinuationEvent
-from semshell.kernel.operations import (
-    CancelProcess,
-    DetachProcess,
-    SendMessage,
-    SpawnProcesses,
-)
-from semshell.kernel.process import ProcessError, WaitMode
+from semshell.kernel.events import ContinuationEvent, MessageKind
+from semshell.kernel.process import CancelMode, ProcessError, WaitMode
 from semshell.resources.types import ResourceBindingId
-
-Send = SendMessage
-Cancel = CancelProcess
-Detach = DetachProcess
+from semshell.software.image import ProcessSpec
 
 
 @dataclass(frozen=True, slots=True)
-class Spawn(SpawnProcesses):
+class Send:
+    """Send one message with source identity supplied by the Kernel."""
+
+    target_pid: int
+    payload: Any
+    kind: MessageKind = MessageKind.EVENT
+    correlation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.target_pid <= 0:
+            raise ValueError("target PID must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class Cancel:
+    """Request cancellation from one authenticated guest Process."""
+
+    target_pid: int
+    mode: CancelMode = CancelMode.SELF
+    reason: str = "cancelled"
+
+    def __post_init__(self) -> None:
+        if self.target_pid <= 0:
+            raise ValueError("target PID must be positive")
+        if not self.reason:
+            raise ValueError("cancellation reason must not be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class Detach:
+    """Remove lifecycle ownership from one direct attached child."""
+
+    child_pid: int
+
+    def __post_init__(self) -> None:
+        if self.child_pid <= 0:
+            raise ValueError("child PID must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class Spawn:
     """Request atomic admission of one or more process specifications."""
 
+    specs: tuple[ProcessSpec, ...]
     wait: bool = False
     wait_mode: WaitMode = WaitMode.ALL
 
     def __post_init__(self) -> None:
-        super(Spawn, self).__post_init__()
+        if not self.specs:
+            raise ValueError("Spawn requires at least one process specification")
+        object.__setattr__(self, "specs", tuple(self.specs))
 
 
 @dataclass(frozen=True, slots=True)

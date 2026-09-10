@@ -198,6 +198,22 @@ type decoupling rather than semantic reduction.
 Revert the canonical Action definitions and adapter mapping as one stage. No
 behavioral migration has occurred.
 
+### Completion record
+
+Completed on 2026-09-10 without changing the Control protocol or guest behavior:
+
+- guest `Send`, `Spawn`, `Cancel`, and `Detach` are canonical independent
+  dataclasses in `kernel/actions.py`;
+- Control operations remain independent payloads and ControlGateway dispatches
+  them directly to trusted Kernel methods;
+- architecture tests reject guest dependencies on `kernel.operations` and
+  `semshell.control`;
+- ControlRequest rejects all same-shape guest administration Actions;
+- all four offline demo commands remained compatible;
+- pytest: 159 passed;
+- Ruff: passed;
+- strict mypy: 57 source files passed.
+
 ## 7. Stage 3 — Reduce lifecycle and software semantics
 
 This is the main incompatible contract change. Perform it as three sequential

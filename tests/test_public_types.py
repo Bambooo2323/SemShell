@@ -12,12 +12,11 @@ from semshell.kernel import (
     OwnershipMode,
     ProcessState,
     Send,
-    SendMessage,
     Spawn,
-    SpawnProcesses,
     Wait,
     WaitMode,
 )
+from semshell.kernel.operations import SendMessage, SpawnProcesses
 from semshell.security import Authority, Permission, Principal
 
 
@@ -75,12 +74,14 @@ def test_wait_accepts_an_empty_target_set() -> None:
     assert action.child_pids == ()
 
 
-def test_process_actions_reuse_kernel_operation_payloads() -> None:
+def test_process_actions_are_distinct_from_control_operation_payloads() -> None:
     send = Send(target_pid=1, payload="hello")
     spawn = Spawn((ProcessSpec(capability="echo"),))
 
-    assert isinstance(send, SendMessage)
-    assert isinstance(spawn, SpawnProcesses)
+    assert not isinstance(send, SendMessage)
+    assert not isinstance(spawn, SpawnProcesses)
+    assert type(send).__module__ == "semshell.kernel.actions"
+    assert type(spawn).__module__ == "semshell.kernel.actions"
 
 
 def test_process_state_contains_failure_cleanup_state() -> None:

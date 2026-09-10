@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Never
 
-from semshell.kernel import (
-    CancelMode,
+from semshell.kernel.operations import (
     CancelProcess,
     ExternalControlOperation,
     InspectProcess,
@@ -21,6 +20,7 @@ from semshell.kernel import (
     SpawnProcesses,
     WaitProcess,
 )
+from semshell.kernel.process import CancelMode
 from semshell.security import Authority, Permission
 from semshell.software.image import ProcessSpec
 

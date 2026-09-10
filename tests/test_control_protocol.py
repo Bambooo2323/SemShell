@@ -18,9 +18,10 @@ from semshell.control import (
     RequestState,
     SessionProtocolError,
 )
-from semshell.kernel import Send
+from semshell.kernel import Cancel, Detach, Send, Spawn
 from semshell.kernel.operations import ListImages
 from semshell.security import Authority, Principal
+from semshell.software.image import ProcessSpec
 
 
 def request(value: str) -> ControlRequest:
@@ -57,9 +58,18 @@ async def test_unsupported_version_is_rejected_before_admission() -> None:
     assert admitted.state is RequestState.ADMITTED
 
 
-def test_external_session_cannot_originate_process_ipc() -> None:
+@pytest.mark.parametrize(
+    "action",
+    (
+        Send(target_pid=1, payload="forged"),
+        Spawn((ProcessSpec(image="forged@1"),)),
+        Cancel(target_pid=1),
+        Detach(child_pid=1),
+    ),
+)
+def test_external_session_rejects_guest_process_actions(action: object) -> None:
     with pytest.raises(TypeError, match="not available"):
-        ControlRequest(RequestId("one"), Send(target_pid=1, payload="forged"))  # type: ignore[arg-type]
+        ControlRequest(RequestId("one"), action)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
