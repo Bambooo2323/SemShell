@@ -11,7 +11,13 @@ from typing import Any, cast
 
 from semshell import __version__
 from semshell.cli.control import run_local_control
-from semshell.examples import OperatorKind, run_demo
+from semshell.examples import (
+    OperatorKind,
+    project_demo_report,
+    project_extended_report,
+    run_demo,
+    run_extended_demo,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,37 +27,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
     demo = commands.add_parser("demo", help="run the flattened Process proof")
-    demo.add_argument("--operator", choices=("human", "rule", "llm"), required=True)
+    selection = demo.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--operator", choices=("human", "rule", "llm"))
+    selection.add_argument("--scenario", choices=("extended",))
     commands.add_parser("control", help="run the persistent local Control CLI")
     return parser
 
 
 async def _run(operator: OperatorKind) -> dict[str, Any]:
     report = await run_demo(operator)
-    return {
-        "operator": report.operator,
-        "result": report.result,
-        "tree": [
-            {
-                "pid": item.pid,
-                "owner_pid": item.owner_pid,
-                "image": f"{item.image_id}@{item.image_version}",
-                "state": item.state,
-                "children": item.child_pids,
-            }
-            for item in report.tree
-        ],
-        "authority_decisions": [
-            {
-                "principal": str(item.principal),
-                "requester_pid": item.requester_pid,
-                "image": item.image_reference,
-                "decision": item.decision,
-                "reason": item.reason,
-            }
-            for item in report.authority_decisions
-        ],
-    }
+    return project_demo_report(report)
+
+
+async def _run_extended() -> dict[str, Any]:
+    return project_extended_report(await run_extended_demo())
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -59,8 +48,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     arguments = build_parser().parse_args(argv)
     if arguments.command == "demo":
-        operator = cast(OperatorKind, arguments.operator)
-        print(json.dumps(asyncio.run(_run(operator)), indent=2))
+        if arguments.scenario == "extended":
+            output = asyncio.run(_run_extended())
+        else:
+            operator = cast(OperatorKind, arguments.operator)
+            output = asyncio.run(_run(operator))
+        print(json.dumps(output, indent=2))
         return 0
     try:
         return asyncio.run(run_local_control(sys.stdin, sys.stdout, sys.stderr))

@@ -283,7 +283,7 @@ Completion criterion: one local CLI session operates one live runtime entirely
 through ControlGateway after bootstrap, every admitted command has one terminal
 reply and audit record, and the CLI cannot forge Process IPC provenance.
 
-## 13. Design repository scope freeze
+## 13. Design edition scope decision
 
 This repository is now an executable reference design rather than the
 production runtime implementation.
@@ -293,44 +293,36 @@ production runtime implementation.
   delegated to Linux and a container runtime.
 - [x] Remove production runtime features from this repository's implementation
   roadmap.
-- [x] Publish the complete 0.3 reference as the design version; do not create a
-  smaller presentation branch now.
-- [x] Freeze physical pruning. Require a recoverable tag/branch and an explicit
-  file-level removal list if that decision is revisited.
+- [x] Adopt a focused design edition after preserving the complete reference.
+- [x] Define the file-level reduction, API migration, validation, and rollback
+  rules in [`design_edition_simplification_plan.md`](design_edition_simplification_plan.md)
+  and [`design_edition_migration_stages.md`](design_edition_migration_stages.md).
+- [ ] Review and preserve the intended complete baseline in a recoverable Git
+  branch and tag before physical removal.
 
-The default policy is maintenance-only after the bounded lifecycle closure in
-Section 14. Until then, changes must map directly to its accepted semantics or
-the final architecture demonstration. Do not add production transports,
-persistence, executors, streams, supervisors, or deployment systems here.
+Until a migration stage changes behavior, current code and `docs/semantics.md`
+remain authoritative. Do not add production transports, persistence, executors,
+streams, supervisors, or deployment systems here.
 
-## 14. Final lifecycle closure
+## 14. Design edition staged migration
 
-生命周期重构的第一、第二阶段已经完成并通过全套验证。第三阶段只实现能够闭合参考模型、
-并能在架构演示中直接观察的语义；详细设计以
-[`lifecycle_rearchitecture.md`](lifecycle_rearchitecture.md) 为准。
+生命周期重构第一、第二阶段的正确性修复已经完成并保留。原第三阶段中的 pause/resume
+和扩展 Control interrupt 不再属于本仓库完成条件。当前公开行为保持有效，直到下面对应
+阶段同时迁移规范、实现、消费者和测试：
 
-- [ ] 将 `cancel(pid)` 收敛为唯一的 ownership 级联语义：Kernel 沿直接 ownership
-  边清理全部 attached 后代，保留各成员已有终态决定。
-- [ ] 在无 await 的提交步骤中封闭取消范围，明确与 Spawn／Detach 的先后顺序。
-- [ ] 对 `CancelMode.SELF/TREE` 提供兼容迁移，两者先归一为级联语义；移除留到明确的
-  破坏性版本，不为演示强制清理旧 API。
-- [ ] 增加与 ProcessState 正交的 `ACTIVE/PAUSED` 调度状态，以及 Host Control 的
-  `PauseProcess`／`ResumeProcess`。暂停只抑制 activation，mailbox、Resource 和 child
-  completion 继续按现有规则推进。
-- [ ] 将 ControlRequest 拆分为 execution state 与 observation state；把
-  `QUEUED -> EXECUTING` 定义为 mutation 的不可回退边界。
-- [ ] interrupt 在执行前将操作标为 SKIPPED，在执行后只结束观察；实际后台结果最多
-  追加一条 late outcome，不改变 ProcessResult。
-- [ ] 同步 `docs/semantics.md`、`devdoc/semantics.md`、Control 协议、公共类型和代码导览。
-- [ ] 用确定性栅栏覆盖 cancel/Spawn/Detach、pause/resume/mailbox、queued/executing
-  interrupt、session close 和审计唯一性；完成全套 pytest、Ruff、strict mypy。
+- [ ] Stage 0 — preserve the complete baseline and adopt the scope decision.
+- [x] Stage 1 — add HostAdmin, explicit report projection, and the extended
+  offline demonstration.
+- [ ] Stage 2 — decouple guest Actions from Control operation types.
+- [ ] Stage 3 — reduce ownership, cancellation, Wait, Message, ProcessSpec,
+  Catalog, and Policy semantics.
+- [ ] Stage 4 — remove the active Control REPL/package and local filesystem proof.
+- [ ] Stage 5 — isolate the optional OpenAI adapter and default dependency path.
+- [ ] Stage 6 — publish current documentation, validate, reader-test, and freeze.
 
-以下事项不是功能完备的门槛：调整 CANCELLING／FAILING 的公开形式、扩展 wait/reap、
-共享 Control close task、durable checkpoint、finalizer 自动恢复。没有新的失败证据或
-演示需求时保持现状。
-
-完成条件：生命周期、暂停和 Control 中断各自有单一职责及确定性竞争结果；规范、实现、
-测试一致。完成后停止扩展 Kernel 功能，转入架构演示。
+Each stage uses the gates and rollback points in
+[`design_edition_migration_stages.md`](design_edition_migration_stages.md). A
+stage is not complete merely because obsolete tests or files were removed.
 
 ## 15. Final Agent architecture demonstration
 
@@ -347,10 +339,10 @@ persistence, executors, streams, supervisors, or deployment systems here.
   识别或分支处理 Agent、Tool、Planner、Memory、Human 或 LLM 角色。
 - [ ] Agent 的拆分、组合和替换通过 ProcessImage、Capability、Spawn、Wait 和 Message
   表达；增加一个同契约 Operator 不修改 Kernel。
-- [ ] authority、ownership、等待关系、取消、暂停和失败结果都能从结构化快照及审计中
+- [ ] authority、ownership、等待关系、取消和失败结果都能从结构化快照及审计中
   观察，而不是藏在 Prompt 或框架内部状态中。
-- [ ] Host Control、Console 输入、Resource bridge 和 Process IPC 的身份边界清晰，外部
-  客户端不能伪造 Process 来源。
+- [ ] HostAdmin、Console 输入、Resource bridge 和 Process IPC 的身份边界清晰，Host
+  facade 不能伪造 Process 来源。
 
 ### 15.2 演示场景
 
@@ -360,10 +352,9 @@ persistence, executors, streams, supervisors, or deployment systems here.
   最终结果、关键 authority decision 和 Resource audit；避免输出内部 PCB 或 Python 对象。
 - [ ] 增加一个替换性场景：注册新的同契约 Operator image，只改 bootstrap/catalog 组装，
   不改 Kernel 和 worker/coordinator。
-- [ ] 增加一个受控生命周期场景：展示 attached 后代级联取消、单 Process pause 后邮箱
-  缓存并 resume，以及 Control interrupt 不等于 Process cancel。
-- [ ] 增加一个边界拒绝场景：缺少 Authority 时 Resource 在 Host 调用前被拒绝，或者
-  ControlSession 无法伪造 Process IPC source PID。
+- [ ] 增加一个受控生命周期场景：展示 attached 后代级联取消、资源取消和迟到结果抑制。
+- [ ] 增加一个边界拒绝场景：缺少 Authority 时 Resource 在 Host 调用前被拒绝，并证明
+  HostAdmin 无法伪造 Process IPC source PID。
 - [ ] 每个场景提供固定输入、预期关键输出和对应测试；默认使用 scripted backend，
   不需要网络、API key、Docker 或人工时序操作。
 
@@ -417,4 +408,4 @@ The writing brief is maintained in
 - [ ] Prepare the separate publication repository and copy only intentional
   release artifacts.
 
-文章资料整理可以并行开始；最终实现证据以第 14 节闭合和第 15 节演示冻结后的结果为准。
+文章资料整理可以并行开始；最终实现证据以设计版 Stage 6 和第 15 节演示冻结后的结果为准。

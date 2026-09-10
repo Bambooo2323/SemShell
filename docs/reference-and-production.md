@@ -350,10 +350,17 @@ not Python inheritance.
 
 ## 11. Simplifying this design repository
 
-Decision: publish the complete version 0.3 reference as the design repository.
-Simplification means freezing scope and presenting a clear primary path, not
-deleting working evidence. The implementation remains an executable history of
-the design through version 0.3.
+Decision: preserve the complete reference in recoverable Git history, then
+migrate the active branch into a focused design edition. The design edition is
+an incompatible presentation-oriented revision whose active code demonstrates
+the architectural argument with a smaller public contract.
+
+Until the staged migration changes a boundary, the current implementation and
+`docs/semantics.md` remain authoritative. The proposal and dependency-safe
+sequence are maintained in
+[`../devdoc/design_edition_simplification_plan.md`](../devdoc/design_edition_simplification_plan.md)
+and
+[`../devdoc/design_edition_migration_stages.md`](../devdoc/design_edition_migration_stages.md).
 
 ### Keep as the primary proof
 
@@ -364,14 +371,16 @@ the design through version 0.3.
 - core lifecycle, authority, Operator-equivalence, and architecture tests;
 - concise public design, semantics, security, and codebase documentation.
 
-### Keep as secondary boundary proofs
+### Reduce to focused boundary proofs
 
-- generic ResourceBinding and the in-memory/local read-only demonstration;
-- transport-neutral Control request/reply distinction;
-- local Control CLI evidence that an external client is not a Process.
+- generic ResourceBinding with an in-memory authorization demonstration;
+- a small trusted Host administration facade with no Process PID;
+- Console input and Process IPC as distinct identity paths.
 
-These sections should not receive new features. Their value is the invariant
-they prove, not completeness.
+The complete transport-neutral Control protocol, administration REPL, and local
+filesystem bridge remain active until their migration stage. They receive no new
+features and leave the active package only after their retained evidence has
+moved to the focused boundaries above.
 
 ### Remove from this repository's roadmap
 
@@ -385,22 +394,19 @@ they prove, not completeness.
 
 Those are production-runtime concerns for the separate repository.
 
-### Optional physical pruning
+### Physical migration rule
 
-Physical pruning is not selected for this repository. If that decision is
-revisited for a smaller presentation branch, first create a recoverable tag or
-branch for the complete version 0.3 reference. A focused change may then remove
-the secondary Control CLI proof and real OpenAI adapter while retaining the
-core demo and scripted LLM path. Do not combine files merely to reduce file
-count: the current package boundaries communicate the architecture.
+Before removing active files, preserve the reviewed complete tree in a branch
+and tag. Then migrate consumers, tests, exports, and current documentation before
+deleting the Control package and local filesystem proof. Historical code remains
+available through Git rather than an importable `archive/` package. Do not
+combine files merely to reduce file count: useful package boundaries communicate
+the architecture.
 
-Physical pruning is optional. Scope freeze, clear navigation, and a short
-default demo provide most clarity without destroying executable evidence.
+## 12. Separate production-runtime milestone
 
-## 12. Next design milestone
-
-The next work here should encode the decisions above as a production-runtime
-specification, not add a Python executor. It should produce:
+After the design edition is frozen, production work belongs in the separate
+runtime repository. Its specification should produce:
 
 1. versioned, language-neutral schemas for registration, Event, Action, and
    ProcessResult frames;

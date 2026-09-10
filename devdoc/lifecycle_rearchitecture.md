@@ -1,12 +1,15 @@
 # SemShell 生命周期整理与分阶段重构计划
 
-日期：2026-09-08。状态：第一、第二阶段已实现并通过验收；第三阶段设计部分收敛，尚未实现。
+日期：2026-09-08。状态：第一、第二阶段已实现并通过验收；原第三阶段由 design edition
+migration 取代，当前行为仍保持有效。
 
 ## 1. 结论与范围
 
 采纳“决定结果、执行清理、等待结果、回收记录、关闭运行时”职责分离的方向，
 分三个阶段推进：先修复局部竞争，再统一内部生命周期，最后迁移公开契约。
-第一、第二阶段已经完成；第三阶段已有三项确认设计，剩余项目继续单独决策。
+第一、第二阶段已经完成并作为 design edition 的正确性基础保留。原第三阶段不再作为
+当前实施路线；替代计划见
+[`design_edition_migration_stages.md`](design_edition_migration_stages.md)。
 
 本文面向 Python 参考内核。现行行为以 `docs/semantics.md` 为准，生产边界沿用
 `docs/reference-and-production.md`：本仓库提供可执行的语义证明，实际执行与隔离交给
@@ -134,10 +137,11 @@ Kernel 必须收集 finalizer 异常。finalizer 意外退出时，监督路径�
 完成条件：所有终止路径只有一个 decision 和一个结果发布点；清理独立于请求者及执行槽；
 竞争、self-cancel、异常清理和超时用例通过，旧公开契约保持成立。
 
-## 5. 第三阶段：已收敛设计与剩余决策
+## 5. Superseded third-stage design
 
-第三阶段改变公开契约，必须在实现前同步 `docs/semantics.md`、Control 协议及类型定义。
-本节记录已经确认的设计，不表示当前代码已经具备相应行为。
+本节保留 2026-09-08 的历史设计背景。它没有实现，也不再是当前 TODO。当前代码继续
+遵循 `docs/semantics.md`，后续不兼容修改按 design edition staged migration 同步规范、
+实现和测试。
 
 ### 5.1 Cancel 统一为 ownership 级联
 
@@ -324,8 +328,8 @@ Python 无法强停吞取消或阻塞事件循环的代码，超时以事件循�
 2026-09-08：第一、第二阶段已实现。Kernel 使用共享 shutdown、稳定目标引用、
 迭代遍历、TerminalDecision 和统一 finalizer；Control 将审计准备与一次性回复提交
 连接起来，移除了 was_replied 快照推断。未改变 TREE 的 FAILING 拒绝规则、reap 资格
-或排队 mutation 的 interruption 行为。第三阶段已收敛级联 cancel、正交 pause 和双维
-interrupt 的设计，但尚未实现；自动恢复仍不在范围内。
+或排队 mutation 的 interruption 行为。原第三阶段设计没有实现，现已由 focused design
+edition migration 取代；自动恢复仍不在范围内。
 
 验收证据：全套 pytest 149 项通过，Ruff 通过，strict mypy 检查 54 个源文件通过。
 新增用例覆盖并发 stop、停机调用者取消后独立完成、wait/reap 与 stop/reap 交错、
