@@ -12,7 +12,6 @@ from semshell.control.reply import ControlReply, ReplyStatus
 from semshell.control.request import ControlRequest, RequestId
 from semshell.control.session import ControlSession, RequestHandle, SessionId
 from semshell.kernel.errors import (
-    ApprovalRequired,
     InvalidAction,
     InvalidKernelState,
     KernelNotRunning,
@@ -26,10 +25,8 @@ from semshell.kernel.operations import (
     InspectTree,
     ListImages,
     ListProcesses,
-    ReapProcess,
     ResolveImage,
     SpawnProcesses,
-    UnregisterImage,
     WaitProcess,
 )
 from semshell.security.authority import Authority, Permission
@@ -38,13 +35,9 @@ from semshell.security.principal import Principal
 MUTATING_OPERATION_TYPES = (
     SpawnProcesses,
     CancelProcess,
-    ReapProcess,
-    UnregisterImage,
 )
 
 CONTROL_CANCEL = Permission("control.process.cancel")
-CONTROL_REAP = Permission("control.process.reap")
-CONTROL_CATALOG_UNREGISTER = Permission("control.catalog.unregister")
 
 
 class ControlGateway:
@@ -192,9 +185,6 @@ class ControlGateway:
                 capability=operation.capability,
                 provider=operation.provider,
             )
-        if isinstance(operation, UnregisterImage):
-            self._require_permission(session, CONTROL_CATALOG_UNREGISTER)
-            return self.kernel.unregister_image(operation.reference)
         if isinstance(operation, SpawnProcesses):
             return await self.kernel.spawn_many(
                 operation.specs,
@@ -207,16 +197,12 @@ class ControlGateway:
             self._require_permission(session, CONTROL_CANCEL)
             return await self.kernel.cancel(
                 operation.target_pid,
-                mode=operation.mode,
                 reason=operation.reason,
             )
         if isinstance(operation, InspectProcess):
             return self.kernel.inspect(operation.pid)
         if isinstance(operation, InspectTree):
             return self.kernel.tree(operation.pid)
-        if isinstance(operation, ReapProcess):
-            self._require_permission(session, CONTROL_REAP)
-            return await self.kernel.reap(operation.pid)
         raise TypeError(f"unsupported external operation: {type(operation).__name__}")
 
     @staticmethod
@@ -262,11 +248,7 @@ class ControlGateway:
         operation: Any, *, value: Any = None
     ) -> dict[str, Any]:
         if isinstance(operation, CancelProcess):
-            return {"target_pid": operation.target_pid, "mode": operation.mode.value}
-        if isinstance(operation, ReapProcess):
-            return {"target_pid": operation.pid}
-        if isinstance(operation, UnregisterImage):
-            return {"target_image": operation.reference}
+            return {"target_pid": operation.target_pid}
         if isinstance(operation, SpawnProcesses):
             details = {
                 "requested_authority": tuple(
@@ -363,7 +345,6 @@ class ControlGateway:
             (ProcessNotFound, "kernel.process_not_found"),
             (InvalidKernelState, "kernel.invalid_state"),
             (InvalidAction, "kernel.invalid_action"),
-            (ApprovalRequired, "policy.approval_required"),
             (OperationDenied, "policy.operation_denied"),
             (LookupError, "kernel.lookup_failed"),
             (ValueError, "kernel.invalid_argument"),
@@ -378,7 +359,7 @@ class ControlGateway:
                         if isinstance(exc, OperationDenied)
                         else ControlErrorOrigin.KERNEL
                     ),
-                    retryable=isinstance(exc, ApprovalRequired),
+                    retryable=False,
                 )
         return ControlError(
             code="gateway.internal_error",

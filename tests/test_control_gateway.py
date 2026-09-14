@@ -327,8 +327,8 @@ async def test_spawn_authority_cannot_exceed_session_ceiling() -> None:
 
     assert reply.status is ReplyStatus.REJECTED
     assert reply.error is not None
-    assert reply.error.code == "policy.approval_required"
-    assert reply.error.retryable is True
+    assert reply.error.code == "policy.operation_denied"
+    assert reply.error.retryable is False
     assert kernel.process_count == 0
     await gateway.close_session(session)
     await kernel.stop()

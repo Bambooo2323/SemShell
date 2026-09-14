@@ -7,13 +7,11 @@ from typing import Any, cast
 
 from semshell.kernel import (
     Cancel,
-    CancelMode,
     DiscoverImages,
     Exit,
     Send,
     Spawn,
     Wait,
-    WaitMode,
     Yield,
 )
 from semshell.kernel.actions import ProcessAction
@@ -39,13 +37,11 @@ def action_from_data(value: Any) -> ProcessAction:
     if action == "cancel":
         return Cancel(
             int(data["target_pid"]),
-            mode=CancelMode(str(data.get("mode", CancelMode.SELF))),
             reason=str(data.get("reason", "cancelled")),
         )
     if action == "wait":
         return Wait(
             tuple(int(pid) for pid in data.get("child_pids", ())),
-            WaitMode(str(data.get("mode", WaitMode.ALL))),
         )
     if action == "spawn":
         raw_specs = data.get("specs")
@@ -53,8 +49,6 @@ def action_from_data(value: Any) -> ProcessAction:
             raise ValueError("spawn action requires a non-empty specs list")
         return Spawn(
             tuple(_spec_from_data(item) for item in raw_specs),
-            wait=bool(data.get("wait", False)),
-            wait_mode=WaitMode(str(data.get("wait_mode", WaitMode.ALL))),
         )
     raise ValueError(f"unsupported action: {action!r}")
 

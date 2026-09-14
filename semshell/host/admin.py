@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from semshell.kernel.kernel import ProcessKernel
-from semshell.kernel.process import CancelMode, ProcessResult, ProcessSnapshot
+from semshell.kernel.process import ProcessResult, ProcessSnapshot
 from semshell.security import Authority, Principal
 from semshell.software.image import ProcessSpec
 
@@ -41,7 +41,7 @@ class HostAdmin:
         return await self._kernel.wait(pid)
 
     async def cancel(self, pid: int, reason: str) -> ProcessResult:
-        return await self._kernel.cancel(pid, mode=CancelMode.TREE, reason=reason)
+        return await self._kernel.cancel(pid, reason=reason)
 
     async def stop(self) -> None:
         await self._kernel.stop()

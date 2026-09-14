@@ -1,6 +1,8 @@
 # SemShell Core Semantics
 
-Status: normative draft for the `0.1` in-process runtime.
+Status: historical `0.1` normative draft. It is superseded by
+`docs/semantics.md` for the active design edition; removed Detach, detached
+ownership, and cancellation-mode clauses below are not current behavior.
 
 This document defines the observable behavior required from a compatible
 SemShell kernel. It deliberately describes semantics before Python APIs. Class

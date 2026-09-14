@@ -143,6 +143,9 @@ Kernel 必须收集 finalizer 异常。finalizer 意外退出时，监督路径�
 遵循 `docs/semantics.md`，后续不兼容修改按 design edition staged migration 同步规范、
 实现和测试。
 
+The Detach compatibility sequence described below was not adopted. Active
+Stage 3A behavior is attached-only and has no Detach or cancellation mode.
+
 ### 5.1 Cancel 统一为 ownership 级联
 
 公开取消不再让调用者选择 SELF 或 TREE。`cancel(pid)` 固定取消目标及其全部 attached

@@ -9,14 +9,12 @@ import pytest
 
 from semshell.kernel import (
     Cancel,
-    CancelMode,
     ChildrenCompleted,
     ContinuationEvent,
     Exit,
     MessageReceived,
     OperationCompleted,
     OperationRejected,
-    OwnershipMode,
     ProcessContext,
     ProcessKernel,
     ProcessState,
@@ -24,7 +22,6 @@ from semshell.kernel import (
     Spawned,
     Started,
     Wait,
-    WaitMode,
     Yield,
 )
 from semshell.kernel.errors import InvalidKernelState, OperationDenied
@@ -166,15 +163,70 @@ class ContinueProgram(ProgramBase):
         raise AssertionError(f"unexpected event: {event!r}")
 
 
+class EmptyWaitProgram(ProgramBase):
+    async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+        if isinstance(event, Started):
+            return Wait()
+        if isinstance(event, ChildrenCompleted):
+            return Exit(tuple(event.results))
+        raise AssertionError(f"unexpected event: {event!r}")
+
+
+class InvalidWaitProgram(ProgramBase):
+    async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+        if isinstance(event, Started):
+            return Wait((int(context.input),))
+        if isinstance(event, OperationRejected):
+            return Exit(event.error.code)
+        raise AssertionError(f"unexpected event: {event!r}")
+
+
+class FIFOReceiverProgram(ProgramBase):
+    def __init__(self) -> None:
+        self.received: list[tuple[int, Any]] = []
+
+    async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+        if isinstance(event, Started):
+            return Yield()
+        if isinstance(event, MessageReceived):
+            self.received.append((event.message.source_pid, event.message.payload))
+            return Exit(tuple(self.received)) if len(self.received) == 2 else Yield()
+        raise AssertionError(f"unexpected event: {event!r}")
+
+
+class DelayedWaitOwnerProgram(ProgramBase):
+    def __init__(self) -> None:
+        self.spawned = asyncio.Event()
+        self.release = asyncio.Event()
+        self.child_pids: tuple[int, ...] = ()
+
+    async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+        if isinstance(event, Started):
+            return Spawn(
+                (
+                    ProcessSpec(image="echo@1", input="first"),
+                    ProcessSpec(image="echo@1", input="second"),
+                )
+            )
+        if isinstance(event, Spawned):
+            self.child_pids = event.pids
+            self.spawned.set()
+            await self.release.wait()
+            return Wait(event.pids)
+        if isinstance(event, ChildrenCompleted):
+            return Exit(tuple(item.result for item in event.results))
+        raise AssertionError(f"unexpected event: {event!r}")
+
+
 class CoordinatorProgram(ProgramBase):
     async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
         if isinstance(event, Started):
             values = tuple(context.input)
             return Spawn(
-                tuple(ProcessSpec(capability="echo", input=value) for value in values),
-                wait=True,
-                wait_mode=WaitMode.ALL,
+                tuple(ProcessSpec(capability="echo", input=value) for value in values)
             )
+        if isinstance(event, Spawned):
+            return Wait(event.pids)
         if isinstance(event, ChildrenCompleted):
             return Exit(tuple(result.result for result in event.results))
         raise AssertionError(f"unexpected event: {event!r}")
@@ -189,17 +241,7 @@ class TreeOwnerProgram(ProgramBase):
     async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
         if isinstance(event, Started):
             return Spawn(
-                (ProcessSpec(image="passive@1"), ProcessSpec(image="passive@1")),
-                wait=True,
-            )
-        raise AssertionError(f"unexpected event: {event!r}")
-
-
-class DetachedOwnerProgram(ProgramBase):
-    async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
-        if isinstance(event, Started):
-            return Spawn(
-                (ProcessSpec(image="passive@1", ownership=OwnershipMode.DETACHED),)
+                (ProcessSpec(image="passive@1"), ProcessSpec(image="passive@1"))
             )
         if isinstance(event, Spawned):
             return Yield()
@@ -238,22 +280,6 @@ class CancelChildProgram(ProgramBase):
         raise AssertionError(f"unexpected event: {event!r}")
 
 
-class WaitAnyOwnerProgram(ProgramBase):
-    async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
-        if isinstance(event, Started):
-            return Spawn(
-                (
-                    ProcessSpec(image="echo@1", input="winner"),
-                    ProcessSpec(image="passive@1"),
-                ),
-                wait=True,
-                wait_mode=WaitMode.ANY,
-            )
-        if isinstance(event, ChildrenCompleted):
-            return Yield()
-        raise AssertionError(f"unexpected event: {event!r}")
-
-
 class CountingStopProgram(PassiveProgram):
     def __init__(self) -> None:
         self.stop_count = 0
@@ -273,7 +299,7 @@ class EarlyExitOwnerProgram(ProgramBase):
             return Exit("too early")
         if isinstance(event, OperationRejected):
             self.exit_rejected.set()
-            return Cancel(context.pid, mode=CancelMode.TREE)
+            return Cancel(context.pid)
         raise AssertionError(f"unexpected event: {event!r}")
 
 
@@ -295,18 +321,18 @@ def catalog() -> ProcessCatalog:
     )
     result.register(ProcessImage("passive", "1", PassiveProgram))
     result.register(ProcessImage("continue", "1", ContinueProgram))
+    result.register(ProcessImage("empty-wait", "1", EmptyWaitProgram))
+    result.register(ProcessImage("invalid-wait", "1", InvalidWaitProgram))
     result.register(ProcessImage("coordinator", "1", CoordinatorProgram))
     result.register(ProcessImage("failing", "1", FailingProgram))
     result.register(ProcessImage("tree-owner", "1", TreeOwnerProgram))
-    result.register(ProcessImage("detached-owner", "1", DetachedOwnerProgram))
     result.register(ProcessImage("slow-stop", "1", SlowStopProgram))
     result.register(ProcessImage("cancel-child", "1", CancelChildProgram))
-    result.register(ProcessImage("wait-any-owner", "1", WaitAnyOwnerProgram))
     return result
 
 
 @pytest.mark.asyncio
-async def test_spawn_wait_inspect_and_reap(
+async def test_spawn_wait_and_retain_completed_process(
     catalog: ProcessCatalog, principal: Principal
 ) -> None:
     kernel = ProcessKernel(catalog)
@@ -320,8 +346,8 @@ async def test_spawn_wait_inspect_and_reap(
     assert result.state is ProcessState.EXITED
     assert result.result == "hello"
     assert kernel.inspect(pid).state is ProcessState.EXITED
-    assert await kernel.reap(pid) == result
-    assert kernel.process_count == 0
+    assert kernel.inspect(pid).result is result
+    assert kernel.process_count == 1
     await kernel.stop()
 
 
@@ -379,6 +405,87 @@ async def test_parent_spawns_and_waits_for_attached_children(
 
 
 @pytest.mark.asyncio
+async def test_empty_wait_completes_once_with_no_results(
+    catalog: ProcessCatalog, principal: Principal
+) -> None:
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    pid = await kernel.spawn(ProcessSpec(image="empty-wait@1"), principal=principal)
+
+    result = await kernel.wait(pid, timeout=1)
+
+    assert result.result == ()
+    assert kernel.inspect(pid).waiting_for == ()
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_wait_rejects_a_process_that_is_not_a_direct_child(
+    catalog: ProcessCatalog, principal: Principal
+) -> None:
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    unrelated = await kernel.spawn(ProcessSpec(image="passive@1"), principal=principal)
+    waiter = await kernel.spawn(
+        ProcessSpec(image="invalid-wait@1", input=unrelated), principal=principal
+    )
+
+    result = await kernel.wait(waiter, timeout=1)
+
+    assert result.result == "OperationDenied"
+    await kernel.cancel(unrelated)
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_message_mailbox_preserves_fifo_and_source_fields(
+    catalog: ProcessCatalog, principal: Principal
+) -> None:
+    receiver = FIFOReceiverProgram()
+    catalog.register(ProcessImage("fifo-receiver", "1", lambda: receiver))
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    pid = await kernel.spawn(ProcessSpec(image="fifo-receiver@1"), principal=principal)
+    while kernel.inspect(pid).state is not ProcessState.WAITING:
+        await asyncio.sleep(0)
+
+    await kernel.send(pid, "first", source_pid=7)
+    await kernel.send(pid, "second", source_pid=8)
+    result = await kernel.wait(pid, timeout=1)
+
+    assert result.result == ((7, "first"), (8, "second"))
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_wait_collects_children_that_completed_before_registration(
+    catalog: ProcessCatalog, principal: Principal
+) -> None:
+    owner_program = DelayedWaitOwnerProgram()
+    catalog.register(
+        ProcessImage("delayed-wait-owner", "1", lambda: owner_program)
+    )
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    owner = await kernel.spawn(
+        ProcessSpec(image="delayed-wait-owner@1"), principal=principal
+    )
+    await asyncio.wait_for(owner_program.spawned.wait(), timeout=1)
+    async with asyncio.timeout(1):
+        while any(
+            kernel.inspect(pid).state is not ProcessState.EXITED
+            for pid in owner_program.child_pids
+        ):
+            await asyncio.sleep(0)
+
+    owner_program.release.set()
+    result = await kernel.wait(owner, timeout=1)
+
+    assert result.result == ("first", "second")
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
 async def test_program_exception_becomes_structured_failure(
     catalog: ProcessCatalog, principal: Principal
 ) -> None:
@@ -396,15 +503,13 @@ async def test_program_exception_becomes_structured_failure(
 
 
 @pytest.mark.asyncio
-async def test_pid_is_not_reused_after_reap(
+async def test_pid_is_monotonic_while_completed_records_are_retained(
     catalog: ProcessCatalog, principal: Principal
 ) -> None:
     kernel = ProcessKernel(catalog)
     await kernel.start()
     first = await kernel.spawn(ProcessSpec(capability="echo"), principal=principal)
     await kernel.wait(first, timeout=1)
-    await kernel.reap(first)
-
     second = await kernel.spawn(ProcessSpec(capability="echo"), principal=principal)
 
     assert second > first
@@ -447,41 +552,12 @@ async def test_tree_cancellation_reaches_attached_descendants(
             break
         await asyncio.sleep(0)
 
-    result = await kernel.cancel(root, mode=CancelMode.TREE, reason="test tree")
+    result = await kernel.cancel(root, reason="test tree")
     snapshots = kernel.tree(root)
 
     assert result.state is ProcessState.CANCELLED
     assert all(snapshot.state is ProcessState.CANCELLED for snapshot in snapshots)
     assert all(snapshot.result is not None for snapshot in snapshots)
-    await kernel.stop()
-
-
-@pytest.mark.asyncio
-async def test_detached_child_survives_owner_tree_cancellation(
-    catalog: ProcessCatalog, principal: Principal
-) -> None:
-    kernel = ProcessKernel(catalog)
-    await kernel.start()
-    owner = await kernel.spawn(
-        ProcessSpec(image="detached-owner@1"), principal=principal
-    )
-    detached_pid: int | None = None
-    for _ in range(100):
-        candidates = [
-            snapshot
-            for snapshot in kernel.list_processes()
-            if snapshot.spawned_by_pid == owner and snapshot.owner_pid is None
-        ]
-        if candidates and candidates[0].state is ProcessState.WAITING:
-            detached_pid = candidates[0].pid
-            break
-        await asyncio.sleep(0)
-    assert detached_pid is not None
-
-    await kernel.cancel(owner, mode=CancelMode.TREE)
-
-    assert kernel.inspect(detached_pid).state is ProcessState.WAITING
-    await kernel.cancel(detached_pid)
     await kernel.stop()
 
 
@@ -497,32 +573,6 @@ async def test_cancelled_child_satisfies_parent_wait_with_structured_result(
 
     assert result.state is ProcessState.EXITED
     assert result.result == ProcessState.CANCELLED.value
-    await kernel.stop()
-
-
-@pytest.mark.asyncio
-async def test_wait_any_clears_wait_edge_without_cancelling_other_child(
-    catalog: ProcessCatalog, principal: Principal
-) -> None:
-    kernel = ProcessKernel(catalog)
-    await kernel.start()
-    owner = await kernel.spawn(
-        ProcessSpec(image="wait-any-owner@1"), principal=principal
-    )
-    for _ in range(100):
-        owner_snapshot = kernel.inspect(owner)
-        if (
-            owner_snapshot.state is ProcessState.WAITING
-            and not owner_snapshot.waiting_for
-        ):
-            break
-        await asyncio.sleep(0)
-
-    children = kernel.tree(owner)[1:]
-
-    assert owner_snapshot.waiting_for == ()
-    assert any(child.state is ProcessState.WAITING for child in children)
-    await kernel.cancel(owner, mode=CancelMode.TREE)
     await kernel.stop()
 
 
@@ -622,7 +672,7 @@ async def test_cancellation_cleanup_survives_requester_cancellation(
     await asyncio.wait_for(stop_started.wait(), timeout=1)
 
     owner_cancel = asyncio.create_task(
-        kernel.cancel(owner, mode=CancelMode.TREE, reason="cancel owner")
+        kernel.cancel(owner, reason="cancel owner")
     )
     await asyncio.sleep(0)
     release_stop.set()

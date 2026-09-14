@@ -11,10 +11,11 @@ from semshell.kernel import (
     ProcessAction,
     ProcessContext,
     ProcessEvent,
+    Spawned,
     Started,
 )
 from semshell.llm import LLMRequest, SemanticBackend
-from semshell.shells.base import OperatorTask, complete_task
+from semshell.shells.base import OperatorTask, complete_task, wait_for_spawn
 from semshell.shells.codec import action_from_data
 
 
@@ -63,6 +64,8 @@ class LLMShell:
                 )
             )
             return action_from_data(json.loads(response.output_text))
+        if isinstance(event, Spawned):
+            return wait_for_spawn(event)
         if isinstance(event, ChildrenCompleted):
             return complete_task(event)
         raise RuntimeError(f"unsupported LLMShell event: {type(event).__name__}")

@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 
-from semshell.kernel.events import MessageKind
-from semshell.kernel.process import CancelMode
 from semshell.software.image import ProcessImage, ProcessSpec
 
 
@@ -45,17 +43,6 @@ class RegisterImage:
 
 
 @dataclass(frozen=True, slots=True)
-class UnregisterImage:
-    """Unload one exact image version when it is not in use."""
-
-    reference: str
-
-    def __post_init__(self) -> None:
-        if not self.reference:
-            raise ValueError("image reference must not be empty")
-
-
-@dataclass(frozen=True, slots=True)
 class SpawnProcesses:
     """Admit ProcessSpecs under invocation-bound caller identity."""
 
@@ -75,8 +62,6 @@ class SendMessage:
 
     target_pid: int
     payload: Any
-    kind: MessageKind = MessageKind.EVENT
-    correlation_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.target_pid <= 0:
@@ -99,10 +84,9 @@ class WaitProcess:
 
 @dataclass(frozen=True, slots=True)
 class CancelProcess:
-    """Request cancellation of a Process or attached Process subtree."""
+    """Request cancellation of a Process and its attached descendants."""
 
     target_pid: int
-    mode: CancelMode = CancelMode.SELF
     reason: str = "cancelled"
 
     def __post_init__(self) -> None:
@@ -110,17 +94,6 @@ class CancelProcess:
             raise ValueError("target PID must be positive")
         if not self.reason:
             raise ValueError("cancellation reason must not be empty")
-
-
-@dataclass(frozen=True, slots=True)
-class DetachProcess:
-    """Remove lifecycle ownership from one direct attached child."""
-
-    child_pid: int
-
-    def __post_init__(self) -> None:
-        if self.child_pid <= 0:
-            raise ValueError("child PID must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,58 +118,40 @@ class InspectTree:
             raise ValueError("PID must be positive")
 
 
-@dataclass(frozen=True, slots=True)
-class ReapProcess:
-    """Remove one completed Process from the live Process Table."""
-
-    pid: int
-
-    def __post_init__(self) -> None:
-        if self.pid <= 0:
-            raise ValueError("PID must be positive")
-
-
 KernelOperation: TypeAlias = (
     ListImages
     | ListProcesses
     | ResolveImage
     | RegisterImage
-    | UnregisterImage
     | SpawnProcesses
     | SendMessage
     | WaitProcess
     | CancelProcess
-    | DetachProcess
     | InspectProcess
     | InspectTree
-    | ReapProcess
 )
 
-# External sessions have no PID and therefore cannot originate Process IPC or
-# detach another Process's child. Console input uses a separately bound Host
-# bridge and is not a generic Control operation.
+# External sessions have no PID and therefore cannot originate Process IPC.
+# Console input uses a separately bound Host bridge and is not a generic
+# Control operation.
 ExternalControlOperation: TypeAlias = (
     ListImages
     | ListProcesses
     | ResolveImage
-    | UnregisterImage
     | SpawnProcesses
     | WaitProcess
     | CancelProcess
     | InspectProcess
     | InspectTree
-    | ReapProcess
 )
 
 EXTERNAL_CONTROL_OPERATION_TYPES = (
     ListImages,
     ListProcesses,
     ResolveImage,
-    UnregisterImage,
     SpawnProcesses,
     WaitProcess,
     CancelProcess,
     InspectProcess,
     InspectTree,
-    ReapProcess,
 )

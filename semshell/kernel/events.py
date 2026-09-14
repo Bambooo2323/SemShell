@@ -2,27 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from enum import StrEnum
-from types import MappingProxyType
+from dataclasses import dataclass
 from typing import Any, TypeAlias
-from uuid import uuid4
 
 from semshell.kernel.process import ProcessError, ProcessResult
 from semshell.resources.types import ResourceBindingId, ResourceInvocationId
 from semshell.security.principal import Principal
 from semshell.software.image import ProcessImageDescriptor
-
-
-class MessageKind(StrEnum):
-    """Kernel-defined IPC message categories."""
-
-    REQUEST = "REQUEST"
-    RESULT = "RESULT"
-    EVENT = "EVENT"
-    ERROR = "ERROR"
-    SIGNAL = "SIGNAL"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,18 +17,11 @@ class Message:
 
     source_pid: int
     target_pid: int
-    kind: MessageKind
     payload: Any
-    message_id: str = field(default_factory=lambda: str(uuid4()))
-    correlation_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.source_pid <= 0 or self.target_pid <= 0:
             raise ValueError("message PIDs must be positive")
-        if not self.message_id:
-            raise ValueError("message ID must not be empty")
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 
 @dataclass(frozen=True, slots=True)

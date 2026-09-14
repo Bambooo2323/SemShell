@@ -6,7 +6,6 @@ from semshell.security.policy import (
     AdmissionDecision,
     AdmissionRequest,
     AdmissionResult,
-    ApprovalArtifact,
     DefaultPolicy,
     Policy,
 )
@@ -16,7 +15,6 @@ __all__ = [
     "AdmissionDecision",
     "AdmissionRequest",
     "AdmissionResult",
-    "ApprovalArtifact",
     "Authority",
     "AuthorityDecisionRecord",
     "DefaultPolicy",

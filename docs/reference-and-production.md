@@ -75,7 +75,7 @@ Linux and Docker do not define:
 - semantic ProcessImage metadata and capabilities;
 - logical Process identity and ownership relationships;
 - Principal and requested/effective Authority;
-- exact operation policy and approval decisions;
+- exact operation-policy and authority decisions;
 - structured Event, Action, Message, and ProcessResult contracts;
 - Operator replacement between Human, Rule, and LLM implementations;
 - resource-binding identities and semantic permission mapping;
@@ -224,10 +224,11 @@ logical Process and a new container execution. Unreported `fork`/subprocess
 descendants remain internal implementation details of their owning container.
 Cancel targets the entire container/cgroup, not one observed Linux PID.
 
-Attached ownership follows the reference semantics: tree cancellation
-propagates to attached children, a parent cannot commit normal success while
-attached children remain active, and detached children become independent
-logical roots. Principal identity, parent/owner PID, and the human/service that
+Ownership follows the reference semantics: every SemShell-spawned child is
+attached, cancellation covers the selected Process and all attached
+descendants, and a parent cannot commit normal success while children remain
+active. Independent logical roots are created only by trusted bootstrap without
+a parent PID. Principal identity, parent/owner PID, and the human/service that
 submitted an external request are distinct recorded fields.
 
 ### 7.2 Worker and control-plane failure rule

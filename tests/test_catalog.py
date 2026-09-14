@@ -8,10 +8,8 @@ import pytest
 
 from semshell import CapabilitySpec, ProcessImage, ProcessImageDescriptor, ProcessSpec
 from semshell.control import ControlGateway, ControlRequest, ReplyStatus, RequestId
-from semshell.control.gateway import CONTROL_CATALOG_UNREGISTER
 from semshell.kernel import Exit, ProcessContext, ProcessKernel, Started
-from semshell.kernel.errors import OperationDenied
-from semshell.kernel.operations import ListImages, ResolveImage, UnregisterImage
+from semshell.kernel.operations import ListImages, ResolveImage
 from semshell.security import Authority, Principal
 from semshell.software.catalog import ProcessCatalog
 
@@ -72,21 +70,6 @@ def test_multiple_providers_require_an_exact_caller_selection() -> None:
         catalog.resolve_capability("demo", provider="other@1")
 
 
-def test_unregister_removes_provider_indexes_deterministically() -> None:
-    catalog = ProcessCatalog()
-    first = image("first", "1")
-    second = image("second", "1")
-    catalog.register(second)
-    catalog.register(first)
-
-    removed = catalog.unregister("first@1")
-
-    assert removed is first
-    assert catalog.list_images() == (second,)
-    assert catalog.providers_for("demo") == (second,)
-    assert catalog.resolve_capability("demo") is second
-
-
 def test_image_descriptor_contains_metadata_but_not_factory() -> None:
     descriptor = image("demo-image", "1").describe()
 
@@ -99,7 +82,7 @@ def test_image_descriptor_contains_metadata_but_not_factory() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upgrade_keeps_running_version_and_unload_requires_reap() -> None:
+async def test_live_registration_keeps_completed_versions_observable() -> None:
     catalog = ProcessCatalog()
     catalog.register(image("worker", "1"))
     kernel = ProcessKernel(catalog)
@@ -119,17 +102,17 @@ async def test_upgrade_keeps_running_version_and_unload_requires_reap() -> None:
     assert first_result.result == "1"
     assert second_result.result == "2"
     assert kernel.inspect(first_pid).image_version == "1"
-    with pytest.raises(OperationDenied, match="still in use"):
-        kernel.unregister_image("worker@1")
-    await kernel.reap(first_pid)
-    removed = kernel.unregister_image("worker@1")
-    assert removed.reference == "worker@1"
+    assert kernel.inspect(first_pid).result is first_result
+    assert tuple(item.reference for item in kernel.list_images()) == (
+        "worker@1",
+        "worker@2",
+    )
     assert kernel.resolve_image(image="worker@2").version == "2"
     await kernel.stop()
 
 
 @pytest.mark.asyncio
-async def test_control_catalog_results_are_factory_free_and_unload_is_safe() -> None:
+async def test_control_catalog_results_are_factory_free() -> None:
     catalog = ProcessCatalog()
     catalog.register(image("first", "1"))
     catalog.register(image("second", "1"))
@@ -138,7 +121,7 @@ async def test_control_catalog_results_are_factory_free_and_unload_is_safe() -> 
     gateway = ControlGateway(kernel)
     session = gateway.open_session(
         principal=Principal.parse("human:test"),
-        authority=Authority.of((CONTROL_CATALOG_UNREGISTER,)),
+        authority=Authority.empty(),
     )
 
     listed = await gateway.submit(session, control_request("list", ListImages()))
@@ -150,15 +133,12 @@ async def test_control_catalog_results_are_factory_free_and_unload_is_safe() -> 
         ),
     )
     resolve_reply = await resolved.wait_reply()
-    removed = await gateway.submit(
-        session, control_request("remove", UnregisterImage("first@1"))
-    )
-
-    remove_reply = await removed.wait_reply()
     assert list_reply.status is ReplyStatus.SUCCEEDED
     assert all(isinstance(item, ProcessImageDescriptor) for item in list_reply.value)
     assert resolve_reply.value.reference == "second@1"
-    assert remove_reply.value.reference == "first@1"
-    assert kernel.list_images() == (resolve_reply.value,)
+    assert tuple(item.reference for item in kernel.list_images()) == (
+        "first@1",
+        "second@1",
+    )
     await gateway.close_session(session)
     await kernel.stop()

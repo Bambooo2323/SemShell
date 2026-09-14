@@ -9,9 +9,7 @@ import pytest
 
 from semshell.kernel import (
     Cancel,
-    CancelMode,
     ConsoleInput,
-    Detach,
     Exit,
     KernelState,
     MessageReceived,
@@ -24,7 +22,7 @@ from semshell.kernel import (
     Started,
     Yield,
 )
-from semshell.kernel.errors import InvalidKernelState, OperationDenied, ProcessNotFound
+from semshell.kernel.errors import InvalidKernelState
 from semshell.security import Authority, Permission, Principal
 from semshell.software.catalog import ProcessCatalog
 from semshell.software.image import ProcessImage, ProcessSpec
@@ -55,7 +53,7 @@ async def spawn_passive(kernel: ProcessKernel, *, parent_pid: int | None = None)
 
 
 @pytest.mark.asyncio
-async def test_stop_survives_cancelled_waiter_reap_race_and_restarts() -> None:
+async def test_stop_survives_cancelled_waiter_and_restarts() -> None:
     child_stop_started = asyncio.Event()
     release_child_stop = asyncio.Event()
     tail_stop_started = asyncio.Event()
@@ -99,7 +97,7 @@ async def test_stop_survives_cancelled_waiter_reap_race_and_restarts() -> None:
     with pytest.raises(InvalidKernelState, match="stopping"):
         await kernel.start()
     victim_result = await kernel.cancel(victim)
-    assert await kernel.reap(victim) is victim_result
+    assert kernel.inspect(victim).result is victim_result
     first_waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await first_waiter
@@ -108,7 +106,7 @@ async def test_stop_survives_cancelled_waiter_reap_race_and_restarts() -> None:
     release_child_stop.set()
     child_result = await asyncio.wait_for(kernel.wait(child), timeout=1)
     assert child_result.state is ProcessState.CANCELLED
-    assert await kernel.reap(child) is child_result
+    assert kernel.inspect(child).result is child_result
 
     # No second stop caller drives the remaining root's cleanup.
     await asyncio.wait_for(tail_stop_started.wait(), timeout=1)
@@ -123,7 +121,7 @@ async def test_stop_survives_cancelled_waiter_reap_race_and_restarts() -> None:
 
 
 @pytest.mark.asyncio
-async def test_concurrent_stop_callers_and_registered_wait_survive_reap() -> None:
+async def test_concurrent_stop_callers_and_registered_wait_retain_result() -> None:
     cleaning = asyncio.Event()
     release = asyncio.Event()
     stop_calls = 0
@@ -151,10 +149,9 @@ async def test_concurrent_stop_callers_and_registered_wait_survive_reap() -> Non
     assert not observer.done()
     release.set()
     await asyncio.wait_for(second, timeout=1)
-    result = await kernel.reap(pid)
-    assert await observer is result
-    with pytest.raises(ProcessNotFound):
-        await kernel.wait(pid)
+    result = await observer
+    assert await kernel.wait(pid) is result
+    assert kernel.inspect(pid).result is result
     assert stop_calls == 1
     assert kernel.state is KernelState.STOPPED
 
@@ -171,13 +168,76 @@ async def test_deep_tree_cancellation_and_tree_snapshot_are_iterative() -> None:
 
     assert len(kernel.tree(root)) == depth
     result = await asyncio.wait_for(
-        kernel.cancel(root, mode=CancelMode.TREE, reason="deep tree"), timeout=5
+        kernel.cancel(root, reason="deep tree"), timeout=5
     )
 
     assert result.state is ProcessState.CANCELLED
     assert all(
         snapshot.state is ProcessState.CANCELLED for snapshot in kernel.tree(root)
     )
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancel_committed_before_spawn_suppresses_late_spawn_action() -> None:
+    activation_started = asyncio.Event()
+    cancellation_seen = asyncio.Event()
+    release_activation = asyncio.Event()
+
+    class LateSpawner(PassiveProgram):
+        async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+            activation_started.set()
+            try:
+                await release_activation.wait()
+            except asyncio.CancelledError:
+                cancellation_seen.set()
+                await release_activation.wait()
+            return Spawn((ProcessSpec(image="passive@1"),))
+
+    catalog = catalog_with_passive()
+    catalog.register(ProcessImage("late-spawner", "1", LateSpawner))
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    root = await kernel.spawn(ProcessSpec(image="late-spawner@1"), principal=PRINCIPAL)
+    await asyncio.wait_for(activation_started.wait(), timeout=1)
+
+    cancelling = asyncio.create_task(kernel.cancel(root))
+    await asyncio.wait_for(cancellation_seen.wait(), timeout=1)
+    release_activation.set()
+    result = await asyncio.wait_for(cancelling, timeout=1)
+
+    assert result.state is ProcessState.CANCELLED
+    assert [item.pid for item in kernel.tree(root)] == [root]
+    await kernel.stop()
+
+
+@pytest.mark.asyncio
+async def test_spawn_committed_before_cancel_is_inside_stable_scope() -> None:
+    child_admitted = asyncio.Event()
+
+    class Owner(PassiveProgram):
+        async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
+            if isinstance(event, Started):
+                return Spawn((ProcessSpec(image="passive@1"),))
+            if isinstance(event, Spawned):
+                child_admitted.set()
+                return Yield()
+            raise AssertionError(f"unexpected event: {event!r}")
+
+    catalog = catalog_with_passive()
+    catalog.register(ProcessImage("owner", "1", Owner))
+    kernel = ProcessKernel(catalog)
+    await kernel.start()
+    root = await kernel.spawn(ProcessSpec(image="owner@1"), principal=PRINCIPAL)
+    await asyncio.wait_for(child_admitted.wait(), timeout=1)
+    before = kernel.tree(root)
+
+    result = await kernel.cancel(root)
+    after = kernel.tree(root)
+
+    assert len(before) == 2
+    assert result.state is ProcessState.CANCELLED
+    assert all(item.state is ProcessState.CANCELLED for item in after)
     await kernel.stop()
 
 
@@ -262,7 +322,7 @@ async def test_self_cancel_action_finishes_without_waiting_on_its_own_completion
 
 
 @pytest.mark.asyncio
-async def test_failing_process_still_rejects_later_cancel_request() -> None:
+async def test_failing_process_preserves_failure_while_cancel_cleans_subtree() -> None:
     child_cleanup_started = asyncio.Event()
     release_child_cleanup = asyncio.Event()
 
@@ -293,11 +353,13 @@ async def test_failing_process_still_rejects_later_cancel_request() -> None:
     await asyncio.wait_for(child_cleanup_started.wait(), timeout=1)
 
     assert kernel.inspect(owner).state is ProcessState.FAILING
-    with pytest.raises(OperationDenied, match="abnormal failure decision already won"):
-        await kernel.cancel(owner, mode=CancelMode.TREE)
-
+    cancelling = asyncio.create_task(kernel.cancel(owner))
+    await asyncio.sleep(0)
+    assert not cancelling.done()
     release_child_cleanup.set()
-    assert (await asyncio.wait_for(kernel.wait(owner), timeout=1)).state is ProcessState.FAILED
+    result = await asyncio.wait_for(cancelling, timeout=1)
+    assert result.state is ProcessState.FAILED
+    assert kernel.tree(owner)[1].state is ProcessState.CANCELLED
     await kernel.stop()
 
 
@@ -355,25 +417,25 @@ async def test_cancel_action_waits_for_completion_without_waking_for_ipc_or_cons
 
 
 @pytest.mark.asyncio
-async def test_stop_cancels_child_detached_after_shutdown_target_snapshot() -> None:
+async def test_stop_cancels_attached_child_after_blocked_activation() -> None:
     first_cleanup_started = asyncio.Event()
     release_first_cleanup = asyncio.Event()
-    detach_started = asyncio.Event()
-    release_detach = asyncio.Event()
+    activation_started = asyncio.Event()
+    release_activation = asyncio.Event()
 
     class BlockingFirstRoot(PassiveProgram):
         async def stop(self, reason: str) -> None:
             first_cleanup_started.set()
             await release_first_cleanup.wait()
 
-    class DetachingRoot:
+    class BlockingRoot:
         async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
             if isinstance(event, Started):
                 return Spawn((ProcessSpec(image="passive@1"),))
             if isinstance(event, Spawned):
-                detach_started.set()
-                await release_detach.wait()
-                return Detach(event.pids[0])
+                activation_started.set()
+                await release_activation.wait()
+                return Yield()
             raise AssertionError(f"unexpected event: {event!r}")
 
         async def stop(self, reason: str) -> None:
@@ -381,22 +443,19 @@ async def test_stop_cancels_child_detached_after_shutdown_target_snapshot() -> N
 
     catalog = catalog_with_passive()
     catalog.register(ProcessImage("blocking-first", "1", BlockingFirstRoot))
-    catalog.register(ProcessImage("detaching-root", "1", DetachingRoot))
+    catalog.register(ProcessImage("blocking-root", "1", BlockingRoot))
     kernel = ProcessKernel(catalog, max_running=2)
     await kernel.start()
     await kernel.spawn(ProcessSpec(image="blocking-first@1"), principal=PRINCIPAL)
     root = await kernel.spawn(
-        ProcessSpec(image="detaching-root@1"), principal=PRINCIPAL
+        ProcessSpec(image="blocking-root@1"), principal=PRINCIPAL
     )
-    await asyncio.wait_for(detach_started.wait(), timeout=1)
+    await asyncio.wait_for(activation_started.wait(), timeout=1)
     child = kernel.tree(root)[1].pid
 
     stopping = asyncio.create_task(kernel.stop())
     await asyncio.wait_for(first_cleanup_started.wait(), timeout=1)
-    release_detach.set()
-    async with asyncio.timeout(1):
-        while kernel.inspect(child).owner_pid is not None:
-            await asyncio.sleep(0)
+    release_activation.set()
     release_first_cleanup.set()
 
     await asyncio.wait_for(stopping, timeout=1)
@@ -507,7 +566,7 @@ async def test_authorized_child_cancels_ancestor_without_completion_notification
         async def handle(self, context: ProcessContext, event: Any):  # type: ignore[no-untyped-def]
             if isinstance(event, Started):
                 assert context.owner_pid is not None
-                return Cancel(context.owner_pid, mode=CancelMode.TREE)
+                return Cancel(context.owner_pid)
             raise AssertionError("a cancelled child must not receive a continuation")
 
         async def stop(self, reason: str) -> None:

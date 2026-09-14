@@ -26,34 +26,12 @@ class ProcessState(StrEnum):
     EXITED = "EXITED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
-    REAPED = "REAPED"
 
 
 COMPLETION_STATES = frozenset(
     {ProcessState.EXITED, ProcessState.FAILED, ProcessState.CANCELLED}
 )
-TERMINAL_STATES = COMPLETION_STATES | {ProcessState.REAPED}
-
-
-class OwnershipMode(StrEnum):
-    """Lifecycle ownership requested for a spawned process."""
-
-    ATTACHED = "attached"
-    DETACHED = "detached"
-
-
-class WaitMode(StrEnum):
-    """Supported child-wait satisfaction modes."""
-
-    ALL = "all"
-    ANY = "any"
-
-
-class CancelMode(StrEnum):
-    """Supported cancellation scopes."""
-
-    SELF = "self"
-    TREE = "tree"
+TERMINAL_STATES = COMPLETION_STATES
 
 
 class ErrorOrigin(StrEnum):
@@ -75,7 +53,6 @@ class ProcessError:
     retryable: bool = False
     details: Mapping[str, Any] = field(default_factory=dict)
     causal_pid: int | None = None
-    causal_message_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.code:

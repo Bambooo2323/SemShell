@@ -29,11 +29,9 @@ from semshell.kernel.operations import (
     InspectTree,
     ListImages,
     ListProcesses,
-    ReapProcess,
     SpawnProcesses,
     WaitProcess,
 )
-from semshell.kernel.process import CancelMode
 from semshell.security import Authority, Permission, Principal
 from semshell.software.catalog import ProcessCatalog
 from semshell.software.image import ProcessImage, ProcessSpec
@@ -63,8 +61,7 @@ class FailingStopKernel(ProcessKernel):
         ("inspect 3", InspectProcess),
         ("tree 3", InspectTree),
         ("wait 3 --timeout 1.5", WaitProcess),
-        ("cancel 3 --tree --reason 'stop now'", CancelProcess),
-        ("reap 3", ReapProcess),
+        ("cancel 3 --reason 'stop now'", CancelProcess),
         ("help", AdapterCommand),
         ("quit", AdapterCommand),
     ),
@@ -75,7 +72,6 @@ def test_required_commands_parse_to_typed_values(
     value = parse_command(line)
     assert isinstance(value, expected_type)
     if isinstance(value, CancelProcess):
-        assert value.mode is CancelMode.TREE
         assert value.reason == "stop now"
 
 
@@ -104,6 +100,7 @@ def test_spawn_parses_json_resolution_and_exact_authority() -> None:
         ("spawn --image demo.echo@1 --input NaN", "cli.invalid_json"),
         ("spawn --image a --capability b", "cli.invalid_value"),
         ("cancel 1 --reason", "cli.invalid_syntax"),
+        ("cancel 1 --tree", "cli.invalid_syntax"),
     ),
 )
 def test_parser_failures_are_closed(line: str, code: str) -> None:
@@ -188,16 +185,15 @@ async def test_scripted_control_session_preserves_one_live_runtime() -> None:
         "cli-4",
         "cli-5",
         "cli-6",
-        "cli-7",
     ]
     assert replies[0]["value"] == [1]
     assert replies[1]["value"][0]["pid"] == 1
     assert replies[2]["value"]["pid"] == 1
     assert replies[3]["value"]["result"] == {"value": "ok"}
+    assert values[4]["adapter_error"]["code"] == "cli.unknown_command"
     assert replies[4]["value"]["pid"] == 1
-    assert replies[5]["error"]["code"] == "kernel.process_not_found"
     assert values[6]["adapter_error"]["code"] == "cli.unknown_command"
-    assert replies[6]["operation"] == "ListImages"
+    assert replies[5]["operation"] == "ListImages"
     assert "semshell> " in prompts.getvalue()
 
 
@@ -277,7 +273,7 @@ async def test_authority_denial_does_not_end_cli_session() -> None:
     assert await run_local_control(source, output, StringIO()) == 0
     replies = [json.loads(line) for line in output.getvalue().splitlines()]
     assert replies[0]["status"] == "REJECTED"
-    assert replies[0]["error"]["code"] == "policy.approval_required"
+    assert replies[0]["error"]["code"] == "policy.operation_denied"
     assert replies[1]["status"] == "SUCCEEDED"
     assert replies[1]["request_id"] == "cli-2"
 
@@ -367,7 +363,7 @@ async def test_all_administration_commands_route_through_gateway() -> None:
     source = StringIO(
         "images\nps\ninspect 999\ntree 999\n"
         "spawn --image demo.echo@1 --input '\"ok\"'\n"
-        "wait 1\ncancel 1\nreap 1\nquit\n"
+        "wait 1\ncancel 1\nquit\n"
     )
 
     assert await LocalControlCLI(runtime, source, StringIO(), StringIO()).run() == 0
@@ -379,7 +375,6 @@ async def test_all_administration_commands_route_through_gateway() -> None:
         "SpawnProcesses",
         "WaitProcess",
         "CancelProcess",
-        "ReapProcess",
     ]
 
 
@@ -395,6 +390,5 @@ def test_cli_handlers_have_no_direct_kernel_operation_calls() -> None:
         ".kernel.cancel(",
         ".kernel.inspect(",
         ".kernel.tree(",
-        ".kernel.reap(",
     )
     assert all(call not in source for call in forbidden)

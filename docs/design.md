@@ -56,8 +56,8 @@ ProcessImage + ProcessSpec -> Kernel admission -> Process
 
 A `ProcessImage` is an immutable versioned software definition. A
 `ProcessSpec` is one request to run an image or resolved capability with input,
-ownership, and requested authority. A `Process` is the admitted runtime
-instance with a PID, mailbox, lifecycle, and final result.
+requested authority, and metadata. A `Process` is the admitted runtime instance
+with a PID, mailbox, attached ownership edge, lifecycle, and final result.
 
 Images are registered through the Capability Catalog. Resolving a capability
 selects software; it does not execute it. Ambiguous provider selection is
@@ -81,10 +81,10 @@ The Kernel delivers one event, the ProcessProgram returns one action, and the
 activation ends. The same Process is never activated concurrently.
 
 Multi-step behavior is retained in program-private state and progresses through
-later Events. For example, Spawn produces a later `ChildrenCompleted` Event;
-the next handler activation can then return Exit.
+later Events. For example, Spawn produces `Spawned`; the Process then returns
+an explicit Wait, receives `ChildrenCompleted`, and can return Exit.
 
-Actions include spawn, send, wait, cancel, detach, discovery, resource
+Actions include spawn, send, wait, cancel, discovery, resource
 invocation, yield, exit, and fail. Continuations arrive as Events. This makes scheduling, ownership,
 cancellation, and audit behavior explicit rather than hiding them inside an
 Agent loop.

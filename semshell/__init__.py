@@ -2,7 +2,6 @@
 
 from semshell.kernel.actions import (
     Cancel,
-    Detach,
     Exit,
     Fail,
     Send,
@@ -12,9 +11,7 @@ from semshell.kernel.actions import (
 )
 from semshell.kernel.kernel import ProcessKernel
 from semshell.kernel.process import (
-    CancelMode,
     ErrorOrigin,
-    OwnershipMode,
     ProcessError,
     ProcessResult,
     ProcessState,
@@ -30,13 +27,10 @@ __version__ = "0.1.0.dev0"
 
 __all__ = [
     "Cancel",
-    "CancelMode",
     "CapabilitySpec",
-    "Detach",
     "ErrorOrigin",
     "Exit",
     "Fail",
-    "OwnershipMode",
     "ProcessError",
     "ProcessImage",
     "ProcessImageDescriptor",

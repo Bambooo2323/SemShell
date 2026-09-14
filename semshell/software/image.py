@@ -7,9 +7,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from semshell.kernel.process import OwnershipMode
 from semshell.security.authority import Authority
-from semshell.security.policy import ApprovalArtifact
 from semshell.security.principal import Principal
 
 if TYPE_CHECKING:
@@ -165,15 +163,9 @@ class ProcessSpec:
     image: str | None = None
     capability: str | None = None
     input: Any = None
-    args: tuple[str, ...] = ()
-    env: Mapping[str, str] = field(default_factory=dict)
-    cwd: str | None = None
     requested_authority: Authority = field(default_factory=Authority.empty)
-    ownership: OwnershipMode = OwnershipMode.ATTACHED
-    resource_limits: Mapping[str, int | float] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
     provider: str | None = None
-    approval: ApprovalArtifact | None = None
 
     def __post_init__(self) -> None:
         if (self.image is None) == (self.capability is None):
@@ -182,9 +174,4 @@ class ProcessSpec:
             raise ValueError("provider requires capability resolution")
         if self.provider == "":
             raise ValueError("provider must not be empty")
-        object.__setattr__(self, "args", tuple(self.args))
-        object.__setattr__(self, "env", MappingProxyType(dict(self.env)))
-        object.__setattr__(
-            self, "resource_limits", MappingProxyType(dict(self.resource_limits))
-        )
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))

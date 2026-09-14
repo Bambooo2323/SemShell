@@ -1,5 +1,9 @@
 # SemShell 0.3 Interactive Control CLI Plan
 
+Status: historical implementation plan. The active design edition has replaced
+self/tree cancellation selection with one attached-subtree cancellation; the
+legacy `--tree` syntax described below is no longer accepted.
+
 ## 1. Purpose
 
 Version 0.3 proves that the transport-neutral Control protocol is usable from

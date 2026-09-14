@@ -18,7 +18,7 @@ from semshell.control import (
     RequestState,
     SessionProtocolError,
 )
-from semshell.kernel import Cancel, Detach, Send, Spawn
+from semshell.kernel import Cancel, Send, Spawn
 from semshell.kernel.operations import ListImages
 from semshell.security import Authority, Principal
 from semshell.software.image import ProcessSpec
@@ -64,7 +64,6 @@ async def test_unsupported_version_is_rejected_before_admission() -> None:
         Send(target_pid=1, payload="forged"),
         Spawn((ProcessSpec(image="forged@1"),)),
         Cancel(target_pid=1),
-        Detach(child_pid=1),
     ),
 )
 def test_external_session_rejects_guest_process_actions(action: object) -> None:

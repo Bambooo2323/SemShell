@@ -15,7 +15,9 @@ from semshell.kernel import (
     ProcessKernel,
     ProcessSnapshot,
     Spawn,
+    Spawned,
     Started,
+    Wait,
 )
 from semshell.llm import ScriptedSemanticBackend
 from semshell.security import AuthorityDecisionRecord, Principal
@@ -54,9 +56,10 @@ class CoordinatorProgram:
                 tuple(
                     ProcessSpec(capability="demo.echo", input=value)
                     for value in context.input
-                ),
-                wait=True,
+                )
             )
+        if isinstance(event, Spawned):
+            return Wait(event.pids)
         if isinstance(event, ChildrenCompleted):
             return Exit(tuple(result.result for result in event.results))
         raise RuntimeError(
@@ -86,7 +89,7 @@ def _operator_factory(operator: OperatorKind) -> Callable[[], ProcessProgram]:
     def create_llm_shell() -> ProcessProgram:
         backend = ScriptedSemanticBackend(
             (
-                '{"action":"spawn","wait":true,"specs":['
+                '{"action":"spawn","specs":['
                 + '{"capability":"demo.coordinate","input":["alpha","beta"]}]}'
             ,)
         )

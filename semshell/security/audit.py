@@ -22,4 +22,3 @@ class AuthorityDecisionRecord:
     granted_authority: Authority
     decision: AdmissionDecision
     reason: str
-    approval_id: str | None = None

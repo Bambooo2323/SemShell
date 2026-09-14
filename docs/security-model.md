@@ -32,21 +32,15 @@ Admission combines:
 
 - caller or parent authority;
 - image authority declaration and minimum requirements;
-- system policy;
-- a previously issued and policy-validated approval artifact.
+- system policy.
 
-Ordinary children cannot silently exceed parent authority. An unresolved
-escalation produces an explicit approval-required result; the Kernel never
-blocks inside spawn for an interactive decision.
+Children cannot exceed parent authority. A request outside the caller, system,
+or image ceiling is rejected; policy never silently reduces it and the Kernel
+never blocks inside spawn for an interactive decision.
 
 Image execute ACL and Process effective authority are separate. Every admission
 decision records the requester, image, requested and granted authority,
-decision, reason, and approval identity when present.
-
-Approval artifacts are exact policy-registered values in version 0.1. The Host
-configuration that constructs the Policy is the root of trust. Artifacts have
-no expiry, revocation, cryptographic signature, or single-use/replay semantics
-in this prototype, so they must not cross an untrusted transport boundary.
+decision, and reason.
 
 ## Host resources
 
@@ -88,12 +82,16 @@ configuration to guest software.
 
 The local Control CLI derives its Principal and Authority from trusted
 bootstrap configuration. Command text cannot replace that identity or enlarge
-the session Authority. Its bootstrap grants the three administration
-permissions required by its mutating commands: `control.process.cancel`,
-`control.process.reap`, and `control.catalog.unregister`. Its encoder accepts
+the session Authority. Its bootstrap grants `control.process.cancel`, the
+administration permission required by its cancellation command. Its encoder accepts
 structured containers and scalar values, plus an explicit closed set of
 SemShell dataclass and Enum types. It fails closed on arbitrary Host objects
 instead of falling back to `repr()` or exception text.
+
+Control cancellation names one target PID and always includes its attached
+descendants. It cannot detach children or choose a weaker self-only scope.
+Existing terminal or failure decisions remain authoritative during the
+cascade.
 
 ## Production containment boundary
 

@@ -2,7 +2,6 @@
 
 from semshell.kernel.actions import (
     Cancel,
-    Detach,
     DiscoverImages,
     Exit,
     Fail,
@@ -13,7 +12,6 @@ from semshell.kernel.actions import (
     Wait,
     Yield,
 )
-from semshell.kernel.errors import ApprovalRequired
 from semshell.kernel.events import (
     ChildrenCompleted,
     ConsoleInput,
@@ -30,25 +28,19 @@ from semshell.kernel.events import (
 )
 from semshell.kernel.kernel import KernelState, ProcessKernel
 from semshell.kernel.process import (
-    CancelMode,
     ErrorOrigin,
-    OwnershipMode,
     ProcessContext,
     ProcessError,
     ProcessResult,
     ProcessSnapshot,
     ProcessState,
-    WaitMode,
 )
 
 __all__ = [
-    "ApprovalRequired",
     "Cancel",
-    "CancelMode",
     "ChildrenCompleted",
     "ConsoleInput",
     "ContinuationEvent",
-    "Detach",
     "DiscoverImages",
     "ErrorOrigin",
     "Exit",
@@ -59,7 +51,6 @@ __all__ = [
     "MessageReceived",
     "OperationCompleted",
     "OperationRejected",
-    "OwnershipMode",
     "ProcessAction",
     "ProcessContext",
     "ProcessError",
@@ -75,6 +66,5 @@ __all__ = [
     "Spawned",
     "Started",
     "Wait",
-    "WaitMode",
     "Yield",
 ]

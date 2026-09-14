@@ -16,11 +16,9 @@ from semshell.kernel.operations import (
     InspectTree,
     ListImages,
     ListProcesses,
-    ReapProcess,
     SpawnProcesses,
     WaitProcess,
 )
-from semshell.kernel.process import CancelMode
 from semshell.security import Authority, Permission
 from semshell.software.image import ProcessSpec
 
@@ -68,15 +66,13 @@ def parse_command(line: str) -> ParsedCommand:
         return ListImages()
     if name == "ps" and not args:
         return ListProcesses()
-    if name in {"inspect", "tree", "reap"}:
+    if name in {"inspect", "tree"}:
         if len(args) != 1:
             _fail("cli.invalid_syntax")
         pid = _positive_int(args[0])
         if name == "inspect":
             return InspectProcess(pid)
-        if name == "tree":
-            return InspectTree(pid)
-        return ReapProcess(pid)
+        return InspectTree(pid)
     if name == "wait":
         return _parse_wait(args)
     if name == "cancel":
@@ -104,16 +100,12 @@ def _parse_cancel(args: list[str]) -> CancelProcess:
     if not args:
         _fail("cli.invalid_syntax")
     pid = _positive_int(args[0])
-    mode = CancelMode.SELF
     reason = "cancelled from local control"
     index = 1
     seen: set[str] = set()
     while index < len(args):
         option = args[index]
-        if option == "--tree" and option not in seen:
-            mode = CancelMode.TREE
-            index += 1
-        elif option == "--reason" and option not in seen and index + 1 < len(args):
+        if option == "--reason" and option not in seen and index + 1 < len(args):
             reason = args[index + 1]
             if not reason:
                 _fail("cli.invalid_value")
@@ -121,7 +113,7 @@ def _parse_cancel(args: list[str]) -> CancelProcess:
         else:
             _fail("cli.invalid_syntax")
         seen.add(option)
-    return CancelProcess(pid, mode, reason)
+    return CancelProcess(pid, reason)
 
 
 def _parse_spawn(args: list[str]) -> SpawnProcesses:
@@ -215,5 +207,5 @@ def _fail(code: str) -> Never:
 
 
 HELP_TEXT = """commands: images, ps, inspect PID, tree PID, spawn, wait PID,
-cancel PID, reap PID, help, quit
+cancel PID, help, quit
 external send is unavailable; Process IPC requires a running Process"""

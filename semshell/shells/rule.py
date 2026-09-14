@@ -11,9 +11,15 @@ from semshell.kernel import (
     ProcessAction,
     ProcessContext,
     ProcessEvent,
+    Spawned,
     Started,
 )
-from semshell.shells.base import OperatorTask, complete_task, spawn_task
+from semshell.shells.base import (
+    OperatorTask,
+    complete_task,
+    spawn_task,
+    wait_for_spawn,
+)
 from semshell.software.image import ProcessImageDescriptor
 
 Rule = Callable[[OperatorTask, tuple[ProcessImageDescriptor, ...]], ProcessAction]
@@ -38,6 +44,8 @@ class RuleShell:
             if self._task is None:
                 raise RuntimeError("RuleShell has no active task")
             return self._rule(self._task, event.images)
+        if isinstance(event, Spawned):
+            return wait_for_spawn(event)
         if isinstance(event, ChildrenCompleted):
             return complete_task(event)
         raise RuntimeError(f"unsupported RuleShell event: {type(event).__name__}")

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 
-from semshell.kernel.events import ContinuationEvent, MessageKind
-from semshell.kernel.process import CancelMode, ProcessError, WaitMode
+from semshell.kernel.events import ContinuationEvent
+from semshell.kernel.process import ProcessError
 from semshell.resources.types import ResourceBindingId
 from semshell.software.image import ProcessSpec
 
@@ -17,8 +17,6 @@ class Send:
 
     target_pid: int
     payload: Any
-    kind: MessageKind = MessageKind.EVENT
-    correlation_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.target_pid <= 0:
@@ -30,7 +28,6 @@ class Cancel:
     """Request cancellation from one authenticated guest Process."""
 
     target_pid: int
-    mode: CancelMode = CancelMode.SELF
     reason: str = "cancelled"
 
     def __post_init__(self) -> None:
@@ -41,23 +38,10 @@ class Cancel:
 
 
 @dataclass(frozen=True, slots=True)
-class Detach:
-    """Remove lifecycle ownership from one direct attached child."""
-
-    child_pid: int
-
-    def __post_init__(self) -> None:
-        if self.child_pid <= 0:
-            raise ValueError("child PID must be positive")
-
-
-@dataclass(frozen=True, slots=True)
 class Spawn:
     """Request atomic admission of one or more process specifications."""
 
     specs: tuple[ProcessSpec, ...]
-    wait: bool = False
-    wait_mode: WaitMode = WaitMode.ALL
 
     def __post_init__(self) -> None:
         if not self.specs:
@@ -70,7 +54,6 @@ class Wait:
     """Wait for direct attached children under the selected mode."""
 
     child_pids: tuple[int, ...] = ()
-    mode: WaitMode = WaitMode.ALL
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "child_pids", tuple(self.child_pids))
@@ -119,7 +102,6 @@ ProcessAction: TypeAlias = (
     Send
     | Spawn
     | Cancel
-    | Detach
     | Wait
     | DiscoverImages
     | InvokeResource

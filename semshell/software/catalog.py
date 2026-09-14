@@ -23,19 +23,6 @@ class ProcessCatalog:
         for capability in image.capabilities:
             self._providers[capability.name].add(image.reference)
 
-    def unregister(self, reference: str) -> ProcessImage:
-        """Remove and return one exact image version."""
-
-        image = self._images.pop(reference, None)
-        if image is None:
-            raise LookupError(f"unknown process image: {reference}")
-        for capability in image.capabilities:
-            providers = self._providers[capability.name]
-            providers.discard(reference)
-            if not providers:
-                del self._providers[capability.name]
-        return image
-
     def get(self, reference: str) -> ProcessImage | None:
         """Return an exact image version, if registered."""
 

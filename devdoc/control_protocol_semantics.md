@@ -1,6 +1,8 @@
 # SemShell Control Protocol Semantics
 
-Status: normative draft for Milestone 4.1  
+Status: historical Milestone 4.1 protocol draft. The active design edition is
+defined by `docs/semantics.md`; its Control subset no longer includes live image
+unregistration or explicit Process reaping.
 Target: SemShell 0.1 control boundary  
 Depends on: [`semantics.md`](./semantics.md)
 

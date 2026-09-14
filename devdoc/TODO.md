@@ -314,8 +314,11 @@ streams, supervisors, or deployment systems here.
 - [x] Stage 1 — add HostAdmin, explicit report projection, and the extended
   offline demonstration.
 - [x] Stage 2 — decouple guest Actions from Control operation types.
-- [ ] Stage 3 — reduce ownership, cancellation, Wait, Message, ProcessSpec,
+- [x] Stage 3 — reduce ownership, cancellation, Wait, Message, ProcessSpec,
   Catalog, and Policy semantics.
+  - [x] 3A — attached-only ownership and cascading cancellation.
+  - [x] 3B — explicit Wait ALL and simplified messaging.
+  - [x] 3C — reduced ProcessSpec, Catalog, and Policy.
 - [ ] Stage 4 — remove the active Control REPL/package and local filesystem proof.
 - [ ] Stage 5 — isolate the optional OpenAI adapter and default dependency path.
 - [ ] Stage 6 — publish current documentation, validate, reader-test, and freeze.

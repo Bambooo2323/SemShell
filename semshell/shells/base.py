@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from semshell.kernel import ChildrenCompleted, Exit, Spawn
+from semshell.kernel import ChildrenCompleted, Exit, Spawn, Spawned, Wait
 from semshell.kernel.actions import ProcessAction
 from semshell.software.image import ProcessImageDescriptor, ProcessSpec
 
@@ -36,9 +36,13 @@ def spawn_task(
         raise LookupError(
             f"task capability requires exactly one provider: {task.capability}"
         )
-    return Spawn(
-        (ProcessSpec(capability=task.capability, input=task.input),), wait=True
-    )
+    return Spawn((ProcessSpec(capability=task.capability, input=task.input),))
+
+
+def wait_for_spawn(event: Spawned) -> Wait:
+    """Wait explicitly for every child admitted by one Spawn Action."""
+
+    return Wait(event.pids)
 
 
 def complete_task(event: ChildrenCompleted) -> ProcessAction:

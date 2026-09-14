@@ -23,7 +23,3 @@ class ProcessNotFound(KernelError):
 
 class OperationDenied(KernelError):
     """Raised at an external API boundary when policy rejects an operation."""
-
-
-class ApprovalRequired(OperationDenied):
-    """Raised when admission needs a prior explicit approval artifact."""

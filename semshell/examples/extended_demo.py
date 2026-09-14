@@ -24,7 +24,9 @@ from semshell.kernel import (
     ProcessState,
     Send,
     Spawn,
+    Spawned,
     Started,
+    Wait,
     Yield,
 )
 from semshell.kernel.kernel import ProcessKernel
@@ -127,9 +129,10 @@ class ResourceOwnerProgram:
                         input={"binding_id": str(WORKSPACE_BINDING), "path": "late.txt"},
                         requested_authority=Authority.of((WORKSPACE_READ,)),
                     ),
-                ),
-                wait=True,
+                )
             )
+        if isinstance(event, Spawned):
+            return Wait(event.pids)
         if isinstance(event, ChildrenCompleted):
             return Exit(event.results[0].result)
         raise RuntimeError(f"unsupported owner event: {type(event).__name__}")

@@ -7,11 +7,10 @@ from typing import Any
 import pytest
 
 from semshell.kernel import Exit, ProcessContext, ProcessKernel, Started
-from semshell.kernel.errors import ApprovalRequired, OperationDenied
+from semshell.kernel.errors import OperationDenied
 from semshell.security import (
     AdmissionDecision,
     AdmissionRequest,
-    ApprovalArtifact,
     Authority,
     DefaultPolicy,
     Permission,
@@ -46,8 +45,8 @@ class ExitProgram:
             (READ,),
             None,
             (),
-            AdmissionDecision.ALLOW,
-            (READ,),
+            AdmissionDecision.DENY,
+            (),
         ),
         (
             (READ, WRITE),
@@ -55,8 +54,8 @@ class ExitProgram:
             None,
             (READ,),
             (),
-            AdmissionDecision.ALLOW,
-            (READ,),
+            AdmissionDecision.DENY,
+            (),
         ),
         (
             (READ,),
@@ -114,44 +113,24 @@ def catalog(*, execute_principals: frozenset[Principal] | None = None) -> Proces
 
 
 @pytest.mark.asyncio
-async def test_child_escalation_requires_prior_explicit_approval() -> None:
-    approval = ApprovalArtifact(
-        "approval-1",
-        PRINCIPAL,
-        "worker@1",
-        Authority.of((WRITE,)),
-        "operator approved workspace writes",
-    )
-    kernel = ProcessKernel(catalog(), policy=DefaultPolicy(approvals=(approval,)))
+async def test_child_escalation_is_rejected() -> None:
+    kernel = ProcessKernel(catalog())
     await kernel.start()
     parent = await kernel.spawn(
         ProcessSpec(image="worker@1", requested_authority=Authority.of((READ,))),
         principal=PRINCIPAL,
     )
 
-    with pytest.raises(ApprovalRequired):
+    with pytest.raises(OperationDenied, match="exceeds caller authority"):
         await kernel.spawn(
             ProcessSpec(image="worker@1", requested_authority=Authority.of((WRITE,))),
             principal=PRINCIPAL,
             parent_pid=parent,
         )
-    child = await kernel.spawn(
-        ProcessSpec(
-            image="worker@1",
-            requested_authority=Authority.of((WRITE,)),
-            approval=approval,
-        ),
-        principal=PRINCIPAL,
-        parent_pid=parent,
-    )
-
-    assert kernel.inspect(child).authority == Authority.of((WRITE,))
     assert [record.decision for record in kernel.authority_decisions()] == [
         AdmissionDecision.ALLOW,
-        AdmissionDecision.REQUIRE_APPROVAL,
-        AdmissionDecision.ALLOW,
+        AdmissionDecision.DENY,
     ]
-    assert kernel.authority_decisions()[-1].approval_id == "approval-1"
     await kernel.stop()
 
 

@@ -238,6 +238,24 @@ work packages on one stage branch; each package receives focused validation.
 Focused gate: deep attached tree, concurrent failure/cancel, self-cancel,
 requester cancellation, Spawn/cancel ordering, and Kernel shutdown.
 
+#### 3A completion record
+
+Completed on 2026-09-14:
+
+- guest children are always attached; independent roots require trusted spawn
+  without a parent PID;
+- `Detach`, detached ownership, and SELF/TREE cancellation selection have no
+  active implementation, import, or export;
+- cancellation atomically selects the target subtree, preserves existing
+  decisions, and commits cancellation for every remaining live member;
+- deterministic tests cover both Spawn-before-cancel and cancel-before-Spawn;
+- current semantics, security, production mapping, and codebase documentation
+  describe the attached-only contract;
+- pytest: 160 passed;
+- Ruff: passed;
+- strict mypy: 57 source files passed;
+- all four offline demo commands passed.
+
 ### 3B. Explicit Wait ALL and simplified messaging
 
 - Remove `WaitMode`, Wait ANY, and `Spawn.wait` / `Spawn.wait_mode`.
@@ -251,6 +269,25 @@ requester cancellation, Spawn/cancel ordering, and Kernel shutdown.
 
 Focused gate: fan-out/fan-in for all Operators, wait rejection, empty/already
 complete waits, FIFO message delivery, and forged-source prevention.
+
+#### 3B completion record
+
+Completed on 2026-09-14:
+
+- Spawn always emits `Spawned`; every retained coordinator and Operator shell
+  returns an explicit `Wait(child_pids)` before consuming results;
+- Wait has one ALL interpretation with deterministic PID-ordered results;
+- deterministic tests cover empty, already-complete, invalid non-child, and
+  ordinary fan-out/fan-in waits;
+- Message and Send retain only source PID, target PID, and payload, with guest
+  source identity supplied by the Kernel;
+- FIFO mailbox and closed message/action field tests pass;
+- current semantics, design, and codebase documentation describe the reduced
+  wait and messaging contract;
+- pytest: 164 passed;
+- Ruff: passed;
+- strict mypy: 57 source files passed;
+- all four offline demo commands passed.
 
 ### 3C. Reduced ProcessSpec, Catalog, and policy
 
@@ -269,6 +306,27 @@ complete waits, FIFO message delivery, and forged-source prevention.
 Focused gate: exact image and capability resolution, ambiguous provider,
 multi-spawn atomicity, child escalation denial, image/system ceiling denial,
 execute ACL, immutable results, and retained completed-tree observation.
+
+#### 3C completion record
+
+Completed on 2026-09-14:
+
+- ProcessSpec retains only image/capability/provider resolution, input,
+  requested Authority, and immutable metadata;
+- admission requires an exact Authority grant; caller, system, and image
+  ceilings, image requirements, execute ACL, and explainable denial records
+  remain enforced;
+- approval artifacts, partial grants, live image unregistration, explicit
+  reaping, and the REAPED state have no active imports or exports;
+- completed Processes, immutable results, and ownership-tree positions remain
+  observable for the lifetime of the short-lived Kernel;
+- Catalog exact/capability resolution, deterministic ambiguity rejection,
+  immutable descriptors, and multi-spawn atomicity remain covered;
+- the still-active Control gateway and CLI use the reduced operation set;
+- pytest: 163 passed;
+- Ruff: passed;
+- strict mypy: 57 source files passed;
+- all four offline demo commands passed.
 
 ### Stage 3 gate
 

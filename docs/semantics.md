@@ -22,7 +22,7 @@ implicit.
 Each Process has one FIFO event mailbox and at most one active handler. The
 Kernel delivers one Event and accepts exactly one returned Action per
 activation. A READY Process has a deliverable Event. Cancelling, failing,
-terminal, and reaped Processes are never activated.
+and terminal Processes are never activated.
 
 Program exceptions become structured failed ProcessResults. Every admitted
 Process publishes exactly one terminal result.
@@ -68,21 +68,25 @@ junction mutation.
 
 ## Ownership and waiting
 
-An attached child has one owner. Ownership controls lifecycle cleanup; waiting
-controls synchronization. Neither implies the other.
+Every guest-spawned child is attached to exactly one owner. Trusted bootstrap
+creates independent roots by spawning without a parent PID. Ownership controls
+lifecycle cleanup; waiting controls synchronization. Neither implies the other.
 
-A Process may wait only for direct attached children. Wait-all, wait-any, and
-empty waits are explicit. A satisfied wait emits at most one
-`ChildrenCompleted` Event.
+A Process may wait only for direct attached children. Wait always covers every
+PID in its explicit target set; empty waits are valid. A satisfied wait emits
+exactly one `ChildrenCompleted` Event with results ordered by PID. Spawn itself
+never waits: it emits `Spawned`, after which the Process may return `Wait`.
 
-A parent cannot commit normal exit while it has active attached children.
-Abnormal failure and tree cancellation perform bounded child cleanup first.
+A parent cannot commit normal exit while it has active children. Abnormal
+failure and cancellation perform bounded descendant cleanup before the owner.
 
 ## IPC
 
 Process Send derives the source PID from the currently running Process. Callers
-cannot supply or forge it. Accepted messages have one authoritative mailbox
-entry. Unknown, cancelling, terminal, and reaped targets reject ordinary IPC.
+cannot supply or forge it. A Message contains only source PID, target PID, and
+one structured payload. Accepted messages have one authoritative FIFO mailbox
+entry; the runtime claims no message-ID deduplication or correlation protocol.
+Unknown, cancelling, and terminal targets reject ordinary IPC.
 
 Console input is a Host-device Event delivered only through a console bridge
 bound to one Process. It is not Process IPC.
@@ -95,44 +99,47 @@ Before PID allocation the Kernel:
 2. validates image execute ACL;
 3. validates the ProcessSpec;
 4. evaluates requested authority against parent/caller authority, image
-   declaration, system policy, and validated approval;
+   declaration and system policy;
 5. records an explainable authority decision;
 6. creates the program and Process record.
 
 A failed admission consumes no PID. Only READY, RUNNING, or WAITING parents may
 create children.
 Batch admission validates and freezes all Process metadata before allocating
-any PID or publishing any Process record. A child cannot gain authority outside its
-parent without a prior explicit policy approval. Partial grants are permitted
-only when policy allows them and image minimum requirements remain satisfied.
-Approval artifacts are validated against trusted Policy configuration; merely
-constructing an artifact-shaped value cannot grant authority. Expiry,
-revocation, signatures, and single-use behavior are outside version 0.1.
+any PID or publishing any Process record. A child cannot gain authority outside
+its parent. System and image ceilings never silently reduce a request: if the
+requested Authority cannot be granted exactly, admission is rejected. Image
+minimum requirements must be contained in that exact grant.
 
 ## Cancellation and completion
 
 Cancellation, abnormal failure, and normal completion race through one
-authoritative lifecycle decision. Once cancellation is accepted, the Kernel
-owns an independent cleanup task; cancellation or failure of the requester
-cannot abandon the target in `CANCELLING`. A concurrently failing child is
-allowed to finish its already committed failure cleanup before its owner
-finishes. Cancellation is idempotent after a terminal result exists.
+authoritative lifecycle decision. There is no self/tree mode selection: every
+accepted cancellation covers the target and all attached descendants. The
+Kernel collects that stable scope and commits all undecided cancellation
+outcomes without yielding. Existing failure or terminal decisions are
+preserved and do not prevent cancellation of the remaining live subtree.
+
+Once cancellation is accepted, the Kernel owns independent cleanup tasks;
+cancellation or failure of the requester cannot abandon a target in
+`CANCELLING`. Children finalize before their owner. Cancellation is idempotent
+after a terminal result exists.
 Kernel shutdown waits for committed abnormal
 failure cleanup in each root tree before cancelling its remaining live Processes.
 Cleanup is bounded; non-cooperative cleanup may be retained only for diagnostics and
 cannot reactivate the Process.
 
-Completion recursively freezes the structured result and leaves an immutable
-ProcessResult available for inspection and waiting. Reaping later removes the
-terminal Process from the live Process Table; PIDs are never reused within one
-Kernel lifetime.
+Completion recursively freezes the structured result and leaves the Process,
+its immutable ProcessResult, and its ownership-tree position available for
+inspection and repeated waiting until the short-lived Kernel is discarded.
+PIDs are never reused within one Kernel lifetime.
 
 ## Catalog
 
 Image versions are registered independently and never mutate running Processes.
 Multiple providers may advertise one capability, but an ambiguous resolution
-without an exact provider is rejected. An image version cannot be unregistered
-while any live Process Table entry uses it.
+without an exact provider is rejected. The design edition has no live Catalog
+unregistration operation.
 
 ## External control
 
@@ -155,12 +162,13 @@ The CLI cannot submit `SendMessage`: a ControlSession has no PID from which
 authentic Process IPC could originate. Console input instead targets one
 previously bound shell Process, and Process-to-Process IPC remains an Action.
 
-External mutations require explicit unscoped administration permissions in
-version 0.3: `control.process.cancel`, `control.process.reap`, and
-`control.catalog.unregister`. The trusted local CLI bootstrap receives these
-permissions. An ordinary Process may cancel itself or an attached descendant;
+The remaining external mutation requiring explicit unscoped administration
+permission is cancellation: `control.process.cancel`. The trusted local CLI
+bootstrap receives this permission. An ordinary Process may cancel itself or an attached descendant;
 cancelling an unrelated Process requires exact
 `Permission("process.cancel", str(target_pid))` authority.
+Every accepted cancellation cascades through the selected target's attached
+descendants; neither guest nor Control callers select a cancellation mode.
 
 ## Role neutrality
 

@@ -15,7 +15,6 @@ from semshell.kernel.process import (
     ProcessError,
     ProcessResult,
     ProcessState,
-    WaitMode,
 )
 from semshell.resources.types import ResourceInvocation, ResourceInvocationId
 from semshell.security.authority import Permission
@@ -55,7 +54,6 @@ class ProcessControlBlock:
     mailbox: deque[ProcessEvent] = field(default_factory=deque)
     child_pids: set[int] = field(default_factory=set)
     waiting_for: frozenset[int] | None = None
-    wait_mode: WaitMode | None = None
     result: ProcessResult | None = None
     runner: asyncio.Task[None] | None = None
     decision: TerminalDecision | None = None

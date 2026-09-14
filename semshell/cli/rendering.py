@@ -16,16 +16,12 @@ from semshell.control.error import ControlError, ControlErrorOrigin
 from semshell.control.reply import ReplyStatus
 from semshell.control.request import RequestId
 from semshell.control.session import SessionId
-from semshell.kernel.events import MessageKind
 from semshell.kernel.process import (
-    CancelMode,
     ErrorOrigin,
-    OwnershipMode,
     ProcessError,
     ProcessResult,
     ProcessSnapshot,
     ProcessState,
-    WaitMode,
 )
 from semshell.resources.types import (
     ResourceAuditEvent,
@@ -62,16 +58,12 @@ _PUBLIC_DATACLASS_TYPES = (
 
 _PUBLIC_ENUM_TYPES = (
     AuditOutcome,
-    CancelMode,
     ControlErrorOrigin,
     ErrorOrigin,
-    MessageKind,
-    OwnershipMode,
     ProcessState,
     ReplyStatus,
     ResourceAuditPhase,
     ResourceErrorCode,
-    WaitMode,
 )
 
 

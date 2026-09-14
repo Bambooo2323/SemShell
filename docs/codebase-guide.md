@@ -86,8 +86,7 @@ keeps one runtime alive across commands but does not bypass ControlGateway.
 | Control protocol | ControlSession Principal and Authority; no PID | ControlRequest | exactly one ControlReply | Host administration and observation |
 
 Mutating Control operations are individually authorized. The local reference
-session receives `control.process.cancel`, `control.process.reap`, and
-`control.catalog.unregister`; command payloads cannot add them.
+session receives `control.process.cancel`; command payloads cannot add it.
 | CLI adapter | local terminal using one ControlSession | parsed typed Control operation | deterministic JSON | local Control interface |
 | ConsoleBridge | trusted Host binding fixed to one PID | principal-attributed input | ConsoleInput Event | input device for one shell Process |
 
@@ -129,20 +128,21 @@ block remains private to the Kernel.
 
 This package is the trusted semantic execution core.
 
-- `process.py` defines ProcessState, ownership/wait/cancel modes, ProcessError,
+- `process.py` defines ProcessState, wait-observation fields, ProcessError,
   ProcessContext, immutable terminal ProcessResult, and read-only
   ProcessSnapshot. These are the public lifecycle values.
 - `actions.py` owns the values returned by guest programs: Send, Spawn, Cancel,
-  Detach, Wait, Yield, DiscoverImages, InvokeResource, Exit, and Fail.
+  Wait, Yield, DiscoverImages, InvokeResource, Exit, and Fail.
   `ProcessAction` is their closed union. These types do not inherit from or
   alias Host Control operations.
 - `events.py` defines mailbox values: Started, MessageReceived,
   ChildrenCompleted, operation continuations, ConsoleInput, catalog discovery,
-  and resource completion/rejection. It also defines Message and MessageKind.
+  and resource completion/rejection. Message contains only source PID, target
+  PID, and payload.
 - `operations.py` defines the temporary typed Host Control payloads.
   `KernelOperation` includes trusted operations; the narrower
-  `ExternalControlOperation` deliberately excludes RegisterImage, SendMessage,
-  and DetachProcess where external identity is insufficient.
+  `ExternalControlOperation` deliberately excludes RegisterImage and
+  SendMessage where external identity is insufficient.
 - `errors.py` contains stable Kernel exception categories used internally and
   normalized by ControlGateway.
 - `_runtime.py` contains the mutable ProcessControlBlock and ResourceTaskRecord,
@@ -155,18 +155,18 @@ This package is the trusted semantic execution core.
 
 The trusted-only exclusions have different reasons: RegisterImage carries an
 executable factory and belongs to Host bootstrap; SendMessage requires an
-authentic running source PID; DetachProcess requires the ownership context of a
-running parent Process.
+authentic running source PID. Guest-created children are always attached and
+there is no detach operation.
 
 The important public ProcessKernel methods are:
 
 - `start()` and `stop()` manage the Kernel lifetime;
-- `register_image()`, `unregister_image()`, `list_images()`, and
+- `register_image()`, `list_images()`, and
   `resolve_image()` expose Catalog operations through a Kernel boundary;
 - `spawn()` and `spawn_many()` admit root or child Processes;
 - `send()` is trusted PID-attributed IPC, while `deliver_console_input()` is a
   distinct Host-device path;
-- `wait()`, `cancel()`, and `reap()` manage or observe lifecycle;
+- `wait()` and `cancel()` manage or observe lifecycle;
 - `inspect()`, `list_processes()`, and `tree()` return immutable snapshots;
 - `authority_decisions()` and `resource_audit_events()` return audit evidence;
 - `list_resource_bindings()` returns factory-free Host diagnostics.
@@ -178,7 +178,7 @@ The main private paths in `kernel.py` are grouped by responsibility:
 - `_apply_action()` is the generic Action dispatch point;
 - `_apply_resource()`, `_run_resource()`, and `_settle_resource()` implement the
   authenticated resource lifecycle without filesystem-specific branches;
-- `_apply_spawn()`, `_apply_wait()`, `_apply_cancel()`, and `_apply_detach()`
+- `_apply_spawn()`, `_apply_wait()`, and `_apply_cancel()`
   implement structured process operations;
 - `_commit_decision()` freezes the unique terminal decision;
 - `_finalize()` owns cancellation and abnormal cleanup outside activation slots,
@@ -210,10 +210,9 @@ This package implements semantic identity and admission authority.
 - `authority.py` defines exact Permission `(capability, scope)` values and the
   immutable Authority set with subset, intersection, union, difference, and
   reduction operations.
-- `policy.py` defines AdmissionRequest, AdmissionResult, approval values, the
-  Policy protocol, and DefaultPolicy. Policy evaluates requested authority
-  against the caller ceiling, image ceiling, minimum requirements, ACL, and
-  configured approval evidence.
+- `policy.py` defines AdmissionRequest, AdmissionResult, the Policy protocol,
+  and DefaultPolicy. Policy requires an exact grant bounded by the caller,
+  system, and image ceilings and checks image minimum requirements.
 - `audit.py` defines immutable AuthorityDecisionRecord entries.
 - `__init__.py` exports the public security API.
 
@@ -395,7 +394,8 @@ guest Spawn / Host Control SpawnProcesses
 ```
 
 A ProcessSpec requests Authority but cannot grant it. Child authority is
-bounded by its caller unless trusted policy accepts configured approval.
+bounded by its caller. Requests outside any authority ceiling are rejected
+without partial grants.
 The two entry payloads are independent types; each boundary calls the trusted
 Kernel admission API with its own authenticated identity.
 
@@ -445,10 +445,10 @@ is audited without changing the earlier INTERRUPTED reply.
   competition, cleanup ownership, and finalizer fault supervision.
 - `test_public_types.py` covers public value construction and shared operation
   types.
-- `test_catalog.py` covers registration, resolution, ambiguity, and in-use
-  unload behavior.
-- `test_authority_policy.py` covers exact authority reduction, denial, approval,
-  ACL, and audit.
+- `test_catalog.py` covers registration, exact resolution, ambiguity, immutable
+  descriptors, and completed-version observation.
+- `test_authority_policy.py` covers exact authority grants, ceiling denial,
+  child-escalation denial, ACL, and audit.
 - `test_control_protocol.py` covers session/request state and the exactly-once
   reply gate.
 - `test_control_gateway.py` covers Kernel dispatch, capacity, interruption,
