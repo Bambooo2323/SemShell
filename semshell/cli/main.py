@@ -1,16 +1,14 @@
-"""Command-line entry points for architecture demos and local Control."""
+"""Command-line entry point for the architecture demonstrations."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
-import sys
 from collections.abc import Sequence
 from typing import Any, cast
 
 from semshell import __version__
-from semshell.cli.control import run_local_control
 from semshell.examples import (
     OperatorKind,
     project_demo_report,
@@ -30,7 +28,6 @@ def build_parser() -> argparse.ArgumentParser:
     selection = demo.add_mutually_exclusive_group(required=True)
     selection.add_argument("--operator", choices=("human", "rule", "llm"))
     selection.add_argument("--scenario", choices=("extended",))
-    commands.add_parser("control", help="run the persistent local Control CLI")
     return parser
 
 
@@ -55,10 +52,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output = asyncio.run(_run(operator))
         print(json.dumps(output, indent=2))
         return 0
-    try:
-        return asyncio.run(run_local_control(sys.stdin, sys.stdout, sys.stderr))
-    except KeyboardInterrupt:
-        return 130
+    raise AssertionError(f"unsupported command: {arguments.command}")
 
 
 if __name__ == "__main__":

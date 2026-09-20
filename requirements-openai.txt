@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Optional provider adapter; no live API request is part of repository validation.
+openai>=2.0

@@ -1,5 +1,12 @@
 # LLM-Operated CLI OS：面向 LLM 的进程化执行环境设计草案
 
+> Historical design context. Current guarantees are defined in
+> [docs/semantics.md](../docs/semantics.md), with final evidence in the
+> [design-edition validation record](../docs/design-edition-validation.md).
+> The pre-removal Stage 3 implementation is recoverable from Git tag
+> `complete-reference-20260915`; older contracts remain in ancestor history.
+> Proposals and completion criteria below do not add active API guarantees.
+
 ## 1. 项目定位
 
 本项目尝试构建一个基于 Python 的简易 CLI-like Operating Environment，用于演示一种 **Process-Centric、LLM-Operated** 的 Agent 系统架构。

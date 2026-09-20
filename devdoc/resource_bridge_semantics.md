@@ -1,5 +1,10 @@
 # SemShell Resource Bridge Semantics
 
+> Historical scope note: the generic resource lifecycle remains active, but the
+> LocalWorkspaceBridge filesystem proof was removed in Stage 4. The complete
+> filesystem implementation is recoverable at Git tag
+> `complete-reference-20260915`; current behavior is in `docs/semantics.md`.
+
 ## 1. Status and scope
 
 This document freezes the candidate `0.2` semantics for one minimal Host

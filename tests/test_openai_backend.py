@@ -7,7 +7,10 @@ from typing import Any
 
 import pytest
 
-from semshell.llm import LLMRequest, OpenAIResponsesBackend
+pytest.importorskip("openai")
+
+from semshell.llm import LLMRequest
+from semshell.llm.openai import OpenAIResponsesBackend
 
 
 class FakeResponses:

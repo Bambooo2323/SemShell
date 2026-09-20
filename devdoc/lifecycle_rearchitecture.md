@@ -1,5 +1,12 @@
 # SemShell 生命周期整理与分阶段重构计划
 
+> Historical design context. Current guarantees are defined in
+> [docs/semantics.md](../docs/semantics.md), with final evidence in the
+> [design-edition validation record](../docs/design-edition-validation.md).
+> The pre-removal Stage 3 implementation is recoverable from Git tag
+> `complete-reference-20260915`; older contracts remain in ancestor history.
+> Proposals and completion criteria below do not add active API guarantees.
+
 日期：2026-09-08。状态：第一、第二阶段已实现并通过验收；原第三阶段由 design edition
 migration 取代，当前行为仍保持有效。
 

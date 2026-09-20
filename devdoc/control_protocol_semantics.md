@@ -1,5 +1,10 @@
 # SemShell Control Protocol Semantics
 
+> Historical document. The Control package and administration REPL were removed
+> from the active design edition in Stage 4. The complete implementation remains
+> recoverable at Git tag `complete-reference-20260915`; current behavior is
+> specified by `docs/semantics.md`.
+
 Status: historical Milestone 4.1 protocol draft. The active design edition is
 defined by `docs/semantics.md`; its Control subset no longer includes live image
 unregistration or explicit Process reaping.

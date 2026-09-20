@@ -42,11 +42,10 @@ The Kernel recognizes only generic execution concepts:
 - Principal and Authority.
 
 The next proof adds generic Host resource bindings without teaching the Kernel
-about filesystems. A Process returns `InvokeResource(binding_id, operation,
+about storage implementations. A Process returns `InvokeResource(binding_id, operation,
 input)`; the Kernel authenticates the caller, checks the binding's trusted
 operation-to-Permission map, and delegates to a passive bridge. The unchanged
-workspace-reader guest works with both an in-memory bridge and a local
-read-only bridge.
+workspace-reader guest uses a deterministic in-memory bridge.
 
 ## Image, specification, and execution
 
@@ -106,6 +105,10 @@ enter the Kernel.
 
 ## Minimal demonstration
 
+Run the three primary commands and the extended command in [README](../README.md).
+Expected JSON fields and validation results are recorded in the
+[design-edition evidence report](design-edition-validation.md).
+
 ```text
 Operator Process
 └── coordinator
@@ -123,14 +126,14 @@ expected to differ.
 ## Host and guest boundary
 
 SemShell is a semantic virtual machine hosted by Python and an existing OS.
-Operators and application software are guest Processes. Terminals, Host files,
-networks, and runtime administration are Host resources or bridges.
+Operators and application software are guest Processes. Terminals, external
+services, and runtime administration are Host resources or bridges.
 
-The ControlGateway is a Host administration and testing boundary, not a second
-privileged Operator model. A console bridge may be bound to a HumanShell PID;
+`HostAdmin` is a small trusted lifecycle facade, not a second privileged
+Operator model. A console bridge may be bound to a HumanShell PID;
 it cannot manufacture Process IPC provenance or act as an arbitrary source PID.
 
-The version 0.1 demo CLI follows this exact path:
+The design-edition demo CLI follows this path:
 
 ```text
 Host CLI
@@ -139,15 +142,9 @@ Host CLI
     -> wait for and print the root ProcessResult and tree
 ```
 
-The CLI does not make the Operator decision and does not route the demo through
-ControlGateway. A future interactive frontend may attach a console bridge to an
-already admitted HumanShell and deliver subsequent `ConsoleInput` Events.
-
-The version 0.3 `control` command is a separate session-lived local
-administration adapter. It keeps one Kernel, ControlGateway, and ControlSession
-alive for that CLI session and maps typed commands to ControlRequests. It is
-useful for inspecting and managing the runtime, but it is not a Process or an
-alternative Operator model.
+The CLI does not make the Operator decision. A future interactive frontend may
+attach a console bridge to an already admitted HumanShell and deliver subsequent
+`ConsoleInput` Events.
 
 Resource bindings are fixed when a Kernel is constructed. Binding IDs are
 opaque identities and exact Authority scopes; guests cannot discover Host

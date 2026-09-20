@@ -15,7 +15,6 @@ from semshell.kernel import (
     Wait,
 )
 from semshell.kernel.events import Message
-from semshell.kernel.operations import SendMessage, SpawnProcesses
 from semshell.security import Authority, Permission, Principal
 
 
@@ -85,12 +84,10 @@ def test_wait_accepts_an_empty_target_set() -> None:
     assert action.child_pids == ()
 
 
-def test_process_actions_are_distinct_from_control_operation_payloads() -> None:
+def test_process_actions_are_defined_by_the_guest_abi() -> None:
     send = Send(target_pid=1, payload="hello")
     spawn = Spawn((ProcessSpec(capability="echo"),))
 
-    assert not isinstance(send, SendMessage)
-    assert not isinstance(spawn, SpawnProcesses)
     assert type(send).__module__ == "semshell.kernel.actions"
     assert type(spawn).__module__ == "semshell.kernel.actions"
 

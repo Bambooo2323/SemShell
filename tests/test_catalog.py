@@ -7,10 +7,8 @@ from typing import Any
 import pytest
 
 from semshell import CapabilitySpec, ProcessImage, ProcessImageDescriptor, ProcessSpec
-from semshell.control import ControlGateway, ControlRequest, ReplyStatus, RequestId
 from semshell.kernel import Exit, ProcessContext, ProcessKernel, Started
-from semshell.kernel.operations import ListImages, ResolveImage
-from semshell.security import Authority, Principal
+from semshell.security import Principal
 from semshell.software.catalog import ProcessCatalog
 
 
@@ -47,10 +45,6 @@ def image(image_id: str, version: str, capability: str = "demo") -> ProcessImage
         required_capabilities=("audit.write",),
         trust_metadata={"source": "test"},
     )
-
-
-def control_request(request_id: str, operation: object) -> ControlRequest:
-    return ControlRequest(RequestId(request_id), operation)  # type: ignore[arg-type]
 
 
 def test_multiple_providers_require_an_exact_caller_selection() -> None:
@@ -112,33 +106,18 @@ async def test_live_registration_keeps_completed_versions_observable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_control_catalog_results_are_factory_free() -> None:
+async def test_kernel_catalog_results_are_factory_free() -> None:
     catalog = ProcessCatalog()
     catalog.register(image("first", "1"))
     catalog.register(image("second", "1"))
     kernel = ProcessKernel(catalog)
     await kernel.start()
-    gateway = ControlGateway(kernel)
-    session = gateway.open_session(
-        principal=Principal.parse("human:test"),
-        authority=Authority.empty(),
-    )
-
-    listed = await gateway.submit(session, control_request("list", ListImages()))
-    list_reply = await listed.wait_reply()
-    resolved = await gateway.submit(
-        session,
-        control_request(
-            "resolve", ResolveImage(capability="demo", provider="second@1")
-        ),
-    )
-    resolve_reply = await resolved.wait_reply()
-    assert list_reply.status is ReplyStatus.SUCCEEDED
-    assert all(isinstance(item, ProcessImageDescriptor) for item in list_reply.value)
-    assert resolve_reply.value.reference == "second@1"
+    listed = kernel.list_images()
+    resolved = kernel.resolve_image(capability="demo", provider="second@1")
+    assert all(isinstance(item, ProcessImageDescriptor) for item in listed)
+    assert resolved.reference == "second@1"
     assert tuple(item.reference for item in kernel.list_images()) == (
         "first@1",
         "second@1",
     )
-    await gateway.close_session(session)
     await kernel.stop()

@@ -1,5 +1,12 @@
 # Design Edition Simplification Plan
 
+> Historical design context. Current guarantees are defined in
+> [docs/semantics.md](../docs/semantics.md), with final evidence in the
+> [design-edition validation record](../docs/design-edition-validation.md).
+> The pre-removal Stage 3 implementation is recoverable from Git tag
+> `complete-reference-20260915`; older contracts remain in ancestor history.
+> Proposals and completion criteria below do not add active API guarantees.
+
 Date: 2026-09-10
 
 Status: proposed implementation plan. This document does not change current

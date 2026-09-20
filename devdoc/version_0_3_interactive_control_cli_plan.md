@@ -1,5 +1,9 @@
 # SemShell 0.3 Interactive Control CLI Plan
 
+> Historical document. The Control CLI was removed from the active design
+> edition in Stage 4. Its complete implementation is recoverable at Git tag
+> `complete-reference-20260915`.
+
 Status: historical implementation plan. The active design edition has replaced
 self/tree cancellation selection with one attached-subtree cancellation; the
 legacy `--tree` syntax described below is no longer accepted.

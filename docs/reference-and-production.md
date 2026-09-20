@@ -2,6 +2,10 @@
 
 ## 1. Repository decision
 
+This document describes both the active Python design edition and a proposed
+separate production architecture. Linux/OCI mappings below are design proposals;
+they are not implemented by this repository.
+
 This Python repository is the executable reference design for SemShell. It is
 not the first implementation layer of a future production scheduler.
 
@@ -110,7 +114,7 @@ resource limits, and cleanup understandable.
 | Authority | policy compiled into mounts, network, secrets, identity, and limits |
 | ResourceBinding | mount, Unix socket, proxy, secret, device, or scoped endpoint |
 | Catalog | semantic manifest index associated with immutable OCI digests |
-| ControlGateway | authenticated production API/control-plane service |
+| Trusted Host administration | authenticated production API/control-plane service |
 | audit tuples | durable append-only operational records |
 
 Logical SemShell PID must remain distinct from Linux PID, namespace PID, Docker
@@ -321,8 +325,7 @@ components:
 - Python ProcessControlBlock objects;
 - direct in-process ProcessProgram calls;
 - in-memory mailboxes and completion futures;
-- InMemoryResourceBridge and trusted-tree LocalWorkspaceBridge;
-- the local demonstration ControlSession and REPL runtime;
+- InMemoryResourceBridge;
 - in-memory audit lists;
 - fake delayed tasks proving cancellation races.
 
@@ -356,8 +359,8 @@ migrate the active branch into a focused design edition. The design edition is
 an incompatible presentation-oriented revision whose active code demonstrates
 the architectural argument with a smaller public contract.
 
-Until the staged migration changes a boundary, the current implementation and
-`docs/semantics.md` remain authoritative. The proposal and dependency-safe
+The current implementation and `docs/semantics.md` are authoritative. The
+proposal and dependency-safe
 sequence are maintained in
 [`../devdoc/design_edition_simplification_plan.md`](../devdoc/design_edition_simplification_plan.md)
 and
@@ -378,10 +381,9 @@ and
 - a small trusted Host administration facade with no Process PID;
 - Console input and Process IPC as distinct identity paths.
 
-The complete transport-neutral Control protocol, administration REPL, and local
-filesystem bridge remain active until their migration stage. They receive no new
-features and leave the active package only after their retained evidence has
-moved to the focused boundaries above.
+The former Control protocol, administration REPL, and local filesystem bridge
+were removed from the active design edition in Stage 4. Their complete
+implementation remains recoverable at Git tag `complete-reference-20260915`.
 
 ### Remove from this repository's roadmap
 
@@ -397,9 +399,10 @@ Those are production-runtime concerns for the separate repository.
 
 ### Physical migration rule
 
-Before removing active files, preserve the reviewed complete tree in a branch
-and tag. Then migrate consumers, tests, exports, and current documentation before
-deleting the Control package and local filesystem proof. Historical code remains
+Stage 4 preserved the pre-removal Stage 3 tree at branch `complete-reference`
+and tag `complete-reference-20260915` (commit `73c133d`). This checkpoint includes
+the Control and filesystem implementations, with the reduced Stage 3 ABI.
+Earlier v0.1 behavior is available in its ancestor history. Historical code remains
 available through Git rather than an importable `archive/` package. Do not
 combine files merely to reduce file count: useful package boundaries communicate
 the architecture.

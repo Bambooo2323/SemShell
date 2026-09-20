@@ -205,23 +205,17 @@ async def test_unexpected_bridge_failure_is_sanitized() -> None:
 
 
 @pytest.mark.asyncio
-async def test_unchanged_guest_matches_fake_and_local_bridges(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    from semshell.resources import LocalWorkspaceBridge
-
-    (tmp_path / "note.txt").write_text("same result", encoding="utf-8")
+async def test_resource_demo_uses_the_in_memory_bridge() -> None:
     fake = await run_resource_demo(
         InMemoryResourceBridge({"note.txt": "same result"}), "note.txt"
     )
-    local = await run_resource_demo(LocalWorkspaceBridge(tmp_path), "note.txt")
     denied_bridge = InMemoryResourceBridge({"note.txt": "hidden"})
     denied = await run_resource_demo(
         denied_bridge, "note.txt", grant_authority=False
     )
-    escaped = await run_resource_demo(
-        LocalWorkspaceBridge(tmp_path), "../outside.txt"
-    )
+    escaped = await run_resource_demo(InMemoryResourceBridge({}), "../outside.txt")
 
-    assert fake.result == local.result == "same result"
+    assert fake.result == "same result"
     assert denied.result == {"error": "resource.authority_denied"}
     assert denied_bridge.invocations == []
     assert escaped.result == {"error": "resource.malformed_input"}

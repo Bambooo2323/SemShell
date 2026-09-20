@@ -2,9 +2,10 @@
 
 Date: 2026-09-10
 
-Status: implementation staging proposal. It refines
-[`design_edition_simplification_plan.md`](design_edition_simplification_plan.md)
-without changing the current contract or source code.
+Status: migration execution record. Stages 1–5 are implemented. Stage 6
+validation and documentation are recorded in
+[the validation report](../docs/design-edition-validation.md); independent reader
+sign-off remains pending. Earlier stage instructions below are historical.
 
 ## 1. Outcome
 
@@ -98,7 +99,9 @@ On 2026-09-10, baseline characterization passed at Git `HEAD` `d295bc0`:
 
 At characterization time, the only working-tree additions were this staged plan
 and its parent simplification plan. The decision documents are now synchronized.
-Baseline branch/tag creation remains pending, so Stage 0 is not complete.
+This was the status on 2026-09-10. On 2026-09-15, the Stage 3 pre-removal tree
+`73c133d` was preserved as `complete-reference` and `complete-reference-20260915`.
+The original pre-migration checkpoint `d295bc0` remains in ancestor history.
 
 ## 5. Stage 1 — Establish the replacement presentation path
 
@@ -388,6 +391,16 @@ stage begins.
 Restore the removed files from the Stage 3 checkpoint. Do not reconstruct them
 manually; the complete reference remains available from the baseline.
 
+### Stage 4 implementation record
+
+Completed on 2026-09-15. The Stage 3 tree is preserved by branch
+`complete-reference` and tag `complete-reference-20260915`. Active Control,
+Control-only operations, the local filesystem bridge, and their dedicated tests
+have been removed; retained callers, resource validation, and current documents
+have been migrated. The active import gate passed; pytest reported 107 passing
+tests; Ruff passed; strict mypy passed for 43 source files; and the Human, Rule,
+LLM, and extended offline demonstrations all passed.
+
 ## 9. Stage 5 — Isolate the optional OpenAI adapter
 
 ### Changes
@@ -417,6 +430,20 @@ manually; the complete reference remains available from the baseline.
 
 Restore the eager export and dependency declaration. No Kernel contract changes
 in this stage.
+
+### Stage 5 completion record
+
+Completed on 2026-09-15:
+
+- the default package no longer imports or installs the OpenAI SDK;
+- `requirements-openai.txt` includes the default requirements and adds the
+  optional provider dependency;
+- a clean default-only virtual environment imported `semshell`, ran all four
+  demos, passed Ruff and strict mypy for 42 source files, and reported
+  106 tests passed with the provider test skipped;
+- the optional environment passed the fake-client adapter test, the complete
+  107-test suite, and strict mypy for all 43 source files;
+- no live API request was performed.
 
 ## 10. Stage 6 — Publish and freeze
 
@@ -463,6 +490,24 @@ Run the offline-import check from Stage 5 in addition to these commands.
 - Current exports and documents contain none of the removed API promises.
 - Historical behavior remains recoverable from the preserved baseline.
 - All final validation and independent reader checks pass.
+
+### Stage 6 review record — 2026-09-15
+
+The documentation and executable gates have passed for the reviewed working
+tree. README now includes both primary and extended offline paths; the article
+evidence map references retained tests; historical design documents link to
+the active contract. Default validation: 106 passed, 1 skipped, 42 files passed
+strict mypy. Optional validation: 107 passed, 43 files passed strict mypy.
+Ruff and all four default CLI subprocesses passed. Source measurement: 43 Python
+files, 4,196 physical lines, four default direct validation dependencies.
+
+Independent reader sign-off is still required by this plan. Stage 6 remains
+open for that gate. The review questions, evidence, remaining fourth-Operator
+scenario from TODO section 15, and recovery point are recorded in
+[design-edition-validation.md](../docs/design-edition-validation.md).
+
+No release publication or new Git checkpoint is implied by this working-tree
+validation record.
 
 ## 11. Stage tracking template
 

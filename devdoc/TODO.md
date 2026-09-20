@@ -55,7 +55,8 @@
 
 ## 2. 建立包骨架和公共类型
 
-- [x] Create the `semshell/` Python package and a single `requirements.txt` for the repository prototype.
+- [x] Create the `semshell/` Python package with default offline requirements;
+  keep provider dependencies in explicitly named optional requirement files.
 - [x] Support Python 3.11+ and validate with pytest, Ruff, and strict mypy commands.
 - [x] 建立以下初始模块：
 
@@ -297,8 +298,8 @@ production runtime implementation.
 - [x] Define the file-level reduction, API migration, validation, and rollback
   rules in [`design_edition_simplification_plan.md`](design_edition_simplification_plan.md)
   and [`design_edition_migration_stages.md`](design_edition_migration_stages.md).
-- [ ] Review and preserve the intended complete baseline in a recoverable Git
-  branch and tag before physical removal.
+- [x] Preserve the reviewed Stage 3 tree at branch `complete-reference` and tag
+  `complete-reference-20260915` before physical removal.
 
 Until a migration stage changes behavior, current code and `docs/semantics.md`
 remain authoritative. Do not add production transports, persistence, executors,
@@ -310,7 +311,7 @@ streams, supervisors, or deployment systems here.
 和扩展 Control interrupt 不再属于本仓库完成条件。当前公开行为保持有效，直到下面对应
 阶段同时迁移规范、实现、消费者和测试：
 
-- [ ] Stage 0 — preserve the complete baseline and adopt the scope decision.
+- [x] Stage 0 — preserve the complete baseline and adopt the scope decision.
 - [x] Stage 1 — add HostAdmin, explicit report projection, and the extended
   offline demonstration.
 - [x] Stage 2 — decouple guest Actions from Control operation types.
@@ -319,15 +320,39 @@ streams, supervisors, or deployment systems here.
   - [x] 3A — attached-only ownership and cascading cancellation.
   - [x] 3B — explicit Wait ALL and simplified messaging.
   - [x] 3C — reduced ProcessSpec, Catalog, and Policy.
-- [ ] Stage 4 — remove the active Control REPL/package and local filesystem proof.
-- [ ] Stage 5 — isolate the optional OpenAI adapter and default dependency path.
+- [x] Stage 4 — remove the active Control REPL/package and local filesystem proof.
+  - [x] Preserve the complete-reference branch and tag.
+  - [x] Remove active Control, Control-only operations, CLI, and tests.
+  - [x] Remove LocalWorkspaceBridge and retain portable in-memory validation.
+  - [x] Migrate current documentation and mark removed designs historical.
+  - [x] Run pytest, Ruff, mypy, and all four demos in a Python environment.
+- [x] Stage 5 — isolate the optional OpenAI adapter and default dependency path.
+  - [x] Remove the eager package export and move OpenAI to
+    `requirements-openai.txt`.
+  - [x] Validate the default environment without the OpenAI SDK: 106 passed,
+    1 optional test skipped, four demos passed, Ruff passed, strict mypy passed
+    for 42 source files.
+  - [x] Validate the optional environment: adapter fake-client test passed,
+    complete suite 107 passed, strict mypy passed for 43 source files.
 - [ ] Stage 6 — publish current documentation, validate, reader-test, and freeze.
+  - [x] Reconcile current documentation, historical banners, and article evidence.
+  - [x] Validate both dependency paths, four demos, Ruff, and strict mypy.
+  - [x] Record source size, direct dependencies, tests, and removed capabilities.
+  - [ ] Record independent reader review and final sign-off.
+  - Evidence: [design-edition validation](../docs/design-edition-validation.md).
 
 Each stage uses the gates and rollback points in
 [`design_edition_migration_stages.md`](design_edition_migration_stages.md). A
 stage is not complete merely because obsolete tests or files were removed.
 
 ## 15. Final Agent architecture demonstration
+
+Stage 6 review note (2026-09-15): primary and extended demonstrations pass.
+The checklist below includes broader article/demo goals, so earlier unchecked
+items are not blanket claims that the implementations are absent. Current
+evidence and remaining gaps (independent reader review and a separate newly
+registered fourth Operator scenario) are tracked in
+[the validation record](../docs/design-edition-validation.md).
 
 第 9 节已经完成最小 Operator 等价性证明；本节将其整理成最终对外演示。目标是让读者
 直接看到 Process-centric Agent 结构的优势，而不是展示一个功能繁多

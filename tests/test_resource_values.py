@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 
 from semshell.resources import (
     InMemoryResourceBridge,
-    LocalWorkspaceBridge,
     ResourceAuditEvent,
     ResourceAuditPhase,
     ResourceBinding,
@@ -182,42 +180,3 @@ def test_resource_audit_event_has_no_payload_field() -> None:
     assert not hasattr(event, "input")
     assert not hasattr(event, "value")
     assert not hasattr(event, "message")
-
-
-@pytest.mark.asyncio
-async def test_local_bridge_matches_read_text_contract(tmp_path: Path) -> None:
-    docs = tmp_path / "docs"
-    docs.mkdir()
-    (docs / "readme.txt").write_text("hello", encoding="utf-8")
-    bridge = LocalWorkspaceBridge(tmp_path)
-
-    assert await bridge.invoke(invocation({"path": "docs/readme.txt"})) == "hello"
-
-
-@pytest.mark.parametrize(
-    "path", ("/absolute.txt", "../escape.txt", "docs/../escape.txt", "C:drive.txt")
-)
-@pytest.mark.asyncio
-async def test_local_bridge_rejects_lexical_escape(
-    tmp_path: Path, path: str
-) -> None:
-    bridge = LocalWorkspaceBridge(tmp_path)
-
-    with pytest.raises(ResourceBridgeError) as captured:
-        await bridge.invoke(invocation({"path": path}))
-
-    assert captured.value.code is ResourceErrorCode.MALFORMED_INPUT
-
-
-@pytest.mark.asyncio
-async def test_local_bridge_normalizes_missing_and_size_limit(tmp_path: Path) -> None:
-    (tmp_path / "large.txt").write_text("hello", encoding="utf-8")
-    bridge = LocalWorkspaceBridge(tmp_path, max_output_bytes=4)
-
-    with pytest.raises(ResourceBridgeError) as missing:
-        await bridge.invoke(invocation({"path": "missing.txt"}))
-    with pytest.raises(ResourceBridgeError) as large:
-        await bridge.invoke(invocation({"path": "large.txt"}))
-
-    assert missing.value.code is ResourceErrorCode.NOT_FOUND
-    assert large.value.code is ResourceErrorCode.LIMIT_EXCEEDED

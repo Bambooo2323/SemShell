@@ -63,7 +63,7 @@ The shortest supporting argument is:
   imposing one Agent loop, graph, or prompting strategy on the Kernel.
 - Process identity, ownership, cancellation, results, and Authority provide a
   useful engineering and management vocabulary for agentic software.
-- External Control, Process IPC, model-provider access, and Host resources are
+- Host administration, Process IPC, model-provider access, and Host resources are
   distinct boundaries.
 - A Python reference state machine and a production Linux/OCI runtime are two
   products sharing semantics, not two layers that should be merged into one
@@ -178,16 +178,16 @@ Explain the differences among:
 | Boundary | Identity source | Direction | Purpose |
 | --- | --- | --- | --- |
 | Process ABI | Kernel-authenticated PID | Event/Action | guest execution |
-| Control | authenticated external Principal/session | request/reply | administration and observation |
+| HostAdmin | trusted bootstrap Principal and ceiling; no PID | lifecycle methods | root administration |
 | Host resource bridge | Kernel-authenticated invocation | invoke/result | scoped external capability |
 | Model backend | Process-owned adapter | provider-neutral request/result | optional semantic computation |
 
-Use the absence of external Control `send` as a compact example: an external
+Use the absence of Host administration `send` as a compact example: an external
 client has no authentic Process PID, so it cannot fabricate Process IPC.
 
-Evidence sources: `docs/codebase-guide.md`, "Boundary comparison";
-`docs/semantics.md`, "External control";
-`tests/test_control_protocol.py::test_external_session_cannot_originate_process_ipc`.
+Evidence sources: `docs/codebase-guide.md`, "Architecture";
+`docs/semantics.md`, "Host administration";
+`tests/test_host_admin.py::test_host_admin_exposes_only_the_closed_management_surface`.
 
 ### 4.7 Why use an OS metaphor if Linux already exists?
 
@@ -223,7 +223,7 @@ sources or clearly label them as the author's interpretation.
 
 Close by separating the complete reference proof from future application work.
 The reference repository demonstrates role neutrality, lifecycle, Authority,
-Host resource boundaries, and external Control. The next design artifact is a
+Host resource boundaries, and Host administration. The next design artifact is a
 language-neutral worker protocol. The production runtime belongs in a separate
 repository using Linux/OCI mechanisms.
 
@@ -236,6 +236,10 @@ Evidence source: `docs/reference-and-production.md`, sections 9–12.
 
 ## 5. Evidence map
 
+Final reproducible commands, expected outputs, measured source size, dependency
+counts, removed capabilities, and review status are recorded in
+[the Stage 6 validation record](../docs/design-edition-validation.md).
+
 | Article statement | Executable evidence | Normative/descriptive source |
 | --- | --- | --- |
 | Operators are replaceable Processes | `tests/test_operator_demo.py` | `docs/design.md` |
@@ -244,8 +248,8 @@ Evidence source: `docs/reference-and-production.md`, sections 9–12.
 | Child Authority cannot silently escalate | `tests/test_authority_policy.py` | `docs/semantics.md` |
 | Attached ownership and cancellation are explicit | `tests/test_kernel.py` | `docs/semantics.md` |
 | Host resources use a generic bridge | `tests/test_kernel_resources.py` | `docs/security-model.md` |
-| External clients cannot forge Process IPC | `tests/test_control_protocol.py` | `docs/semantics.md` |
-| CLI administration preserves Control boundaries | `tests/test_cli_control.py` | `docs/codebase-guide.md` |
+| External clients cannot forge Process IPC | `tests/test_host_admin.py` | `docs/semantics.md` |
+| Demo reports expose identity, denial, and cancellation | `tests/test_demo_cli.py` | `docs/codebase-guide.md` |
 | Provider SDK values stay outside Kernel | `tests/test_openai_backend.py` | README boundary proof |
 | Python and production runtime are separate | not an implementation claim | `docs/reference-and-production.md` |
 
@@ -265,7 +269,7 @@ Use these terms consistently:
 - **Operator**: a role played by a Process.
 - **Principal**: authenticated identity or authorization source.
 - **Authority**: exact permission set carried by one Process execution.
-- **Control**: external administration/observation protocol.
+- **HostAdmin**: trusted root lifecycle facade with no Process PID.
 - **Process ABI**: Event/Action guest execution contract.
 - **Host resource bridge**: trusted adapter to a scoped external resource.
 - **reference runtime/design**: the Python executable specification.
@@ -333,12 +337,13 @@ can defend.
 
 ## 10. Publication readiness checklist
 
-- [x] Reference implementation scope is frozen through version 0.3.
+- [x] Active design-edition scope is defined through Stage 5; Stage 6 evidence is
+  recorded in `docs/design-edition-validation.md`.
 - [x] Reference and production responsibilities are separated.
 - [x] README provides one short deterministic reproduction path.
 - [x] Public architecture, semantics, security, and codebase guides agree.
 - [x] The complete offline suite passes.
-- [x] The documentation split passed context-free reader review.
+- [ ] Independent reader review of the final design edition remains pending.
 - [ ] Collect primary sources for ecosystem and Codex comparisons.
 - [ ] Draft the article section by section.
 - [ ] Verify every external comparison against its cited source.
@@ -353,7 +358,7 @@ The article is ready when a reader unfamiliar with the repository can answer:
 2. Why is the LLM neither Kernel nor Principal?
 3. How are HumanShell, RuleShell, and LLMShell interchangeable?
 4. What does Event/Action replace, and what does it leave to user-space code?
-5. Why can external Control not impersonate a Process?
+5. Why can Host administration not impersonate a Process?
 6. What does the Python reference implementation prove?
 7. What must Linux/OCI implement in production?
 8. Which production semantics are still open?

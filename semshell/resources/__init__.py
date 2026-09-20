@@ -1,7 +1,6 @@
 """Generic Host resource bindings available to the SemShell runtime."""
 
 from semshell.resources.bridge import HostResourceBridge, ResourceBridgeError
-from semshell.resources.local import LocalWorkspaceBridge
 from semshell.resources.memory import InMemoryResourceBridge
 from semshell.resources.registry import ResourceBinding, ResourceRegistry
 from semshell.resources.types import (
@@ -18,7 +17,6 @@ from semshell.resources.types import (
 __all__ = [
     "HostResourceBridge",
     "InMemoryResourceBridge",
-    "LocalWorkspaceBridge",
     "ResourceAuditEvent",
     "ResourceAuditPhase",
     "ResourceBinding",

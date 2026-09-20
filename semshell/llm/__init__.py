@@ -1,4 +1,4 @@
-"""Model-neutral semantic backend interfaces and adapters."""
+"""Model-neutral semantic backend interfaces and offline adapters."""
 
 from semshell.llm.base import (
     LLMBackend,
@@ -7,14 +7,12 @@ from semshell.llm.base import (
     SemanticBackend,
     TokenUsage,
 )
-from semshell.llm.openai import OpenAIResponsesBackend
 from semshell.llm.scripted import ScriptedSemanticBackend
 
 __all__ = [
     "LLMBackend",
     "LLMRequest",
     "LLMResponse",
-    "OpenAIResponsesBackend",
     "ScriptedSemanticBackend",
     "SemanticBackend",
     "TokenUsage",

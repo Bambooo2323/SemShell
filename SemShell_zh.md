@@ -1,195 +1,202 @@
+# SemShell：从 Agent 的决策边界到统一执行模型
 
-## 1.介绍
+## 1. Agent 的核心：上下文管理与 LLM 调用
 
+### 1.1 本文采用的 Agent 模型
 
-1.1 Current Loop-Agent Paradigm
+本文将 LLM Agent 的核心界定为上下文／记忆管理与 LLM 调用所组成的决策单元。它组织本次推理需要的信息，调用模型，再将输出作为回复或行动请求交给外部系统。这是本文用于讨论软件边界的工作定义，不要求所有框架都以相同方式使用 Agent 一词。
 
-P1 — 当前范式定义
-介绍本文使用的描述性术语 Loop Agent：许多当前 Agent 系统可以抽象为“LLM + 外部维护的短期上下文 + 环境交互”的迭代结构。LLM 本身每次调用仍是离散推理，任务连续性主要依赖外部保存并重新提供的 context。
+在这一模型中，LLM 每次调用完成一次离散推理。跨调用的连续性由外部于模型的上下文管理机制维持：保存历史、选择信息、组织输入，并将需要保留的输出用于后续调用。Agent 因而既不等于 LLM 本体，也不必包含它所使用的全部执行设施。
 
-P2 — Context 的作用
-Short-term Context / Working Memory 保存与下一轮推理相关的信息，例如用户输入、历史输出、工具结果、环境观测和 scratchpad。它不是环境真实状态本身，而是 LLM 可见状态的一个选择性投影。
+**Figure 1 — Agent 的决策激活环与 Environment**
 
-Figure 1 — Loop-Agent Interaction Model
-图中表达：
+```text
+                 Environment
+          （执行、资源与运行管理）
+              │             ↑
+      observation           action
+              ↓             │
+       ┌──────────────────────────┐
+       │ 上下文／记忆管理 → LLM 调用 │
+       │         ↑          │     │
+       │         └── 输出 ──┘     │
+       └──────────────────────────┘
+           Agent 的决策激活环
+```
 
-        Environment
-      ↙             ↖
-observation       action
-    ↓               ↑
-Short-term Context ↔ LLM
-        iterative loop
+Figure 1 是后文的核心模型。Agent 根据可见信息产生决策，Environment 处理行动请求并提供观测。一次模型调用结束后，环境中的执行仍可以继续；新的观测则可以成为后续决策的输入。
 
-图片索引：
+### 1.2 上下文、短期记忆与参数化长期记忆
 
-![Figure 1. Loop-Agent Interaction Model](./figures/01-loop-agent.png)
+本文按模型推理时的信息来源区分记忆：本次调用可见的上下文构成短期记忆，模型参数中编码的知识与能力构成参数化长期记忆。这里的“短期”指信息参与本次推理的方式，与信息在外部保存了多久无关。
 
-P3 — Loop 的真正位置
-强调 loop 的核心不是“LLM 与工具不断互调”，而是：
+上下文可以包含用户输入、历史输出、指令、Skill 内容、工具描述、工具结果、检索材料及其他环境观测。对于多模态模型，输入还可以包含图像等模态的表示；它们同样属于本次推理可见的信息。
 
-Context_t
-   ↓ read
-  LLM
-   ↓ write/update
-Context_{t+1}
+在这一划分下，Skill 加载、面向模型的工具注册、历史压缩和检索结果注入，都涉及上下文管理。它们决定模型在本次调用中能看到什么，以及这些信息如何组织。
 
-也就是 LLM 与短期上下文之间持续发生的 read/write update。环境交互则通过 observation 和 action 接入这个内部循环。
+记忆持久化发生在上下文拼装这一侧。信息可以先存入文件或数据库，再在后续调用前选择、读取并装入上下文。即使某条记录已保存多年，它被重新提供给模型时仍是上下文信息；持久化本身不会使它成为模型参数中的记忆。外部存储与检索设施可以独立构造，由上下文管理逻辑按需使用。
 
-1.2 Action and Memory Are Different Channels
+### 1.3 行动与记忆更新是两条通道
 
-P4 — Action 不等于 Memory 写入
-LLM 生成的 action 可以直接作用于 Environment；是否同时将该 command 记录到 context，是独立的日志/记忆策略。
+模型输出可以产生两种不同的后续作用。一种是形成行动请求，由 Environment 处理；另一种是被保存、摘要或重新组织，影响下一次模型调用。
 
-因此应区分：
+```text
+行动通道：模型输出 → 行动请求 → 环境处理
+记忆通道：输入、输出与观测 → 保存／选择／组织 → 后续上下文
+```
 
-Action channel
-→ changes external state
+发出一个请求，与把请求记录进上下文，是两个可分别设计的操作。环境中发生的变化也不必全部进入上下文：执行系统可以保留完整的任务记录，而上下文只包含当前判断需要的部分。
 
-Memory channel
-→ changes future model-visible state
+因此，上下文是环境的选择性表示。它既不等于完整事件日志，也不等于实际系统状态。一个任务是否仍在运行，不应取决于相关文字是否仍保留在模型输入中。
 
-即使工程实现中通常会记录 tool call、command 和 result，这并不是逻辑上的硬性要求。
+### 1.4 决策激活与执行具有不同的连续性
 
-P5 — Observation 同样是选择性的
-Environment 中发生的状态变化也不必全部进入 context。runtime 可以过滤、摘要、裁剪或只保留与后续推理有关的信息。因此：
+本文将上下文组织、模型调用及后续更新所形成的循环称为决策激活环。observe → infer → act → observe 可以继续作为 Agent 的基本决策结构；这条循环本身无需被消除。
 
-context ≠ complete event log
-context ≠ system state
+需要区分的是，一次决策激活与一次外部执行可以具有不同的持续时间。任务可以跨越多次模型调用，也可以在 Agent 暂时没有新决策时继续运行。等待、消息接收、状态跟踪和权限检查，不必依赖模型反复推理才能完成。
 
-它更接近短期工作记忆，或者形成当前后验判断所依赖的近期证据。
+这引出后文的问题：哪些机制属于 Agent 的上下文与决策核心，哪些应当作为独立组件存在，并通过明确接口与 Agent 组合？
 
-1.3 Why This Architecture Works
+## 2. 从决策角色到运行时职责
 
-P6 — 这种结构为什么自然
-Loop Agent 很轻量，因为它不要求 LLM 自己保持持久状态，也不要求工具理解 Agent。LLM 只需读取 context、输出 action；环境执行后返回 observation。
+### 2.1 Agent 作为决策与协调角色
 
-这一模式尤其适合 shell、API、browser、code execution 等离散交互环境。
+回到 Figure 1，Agent 根据 observation 形成 decision，再输出 action。这首先是一个决策与协调角色；在本文讨论的 LLM Agent 中，上下文管理与模型调用构成这一角色的实现核心。
 
-P7 — 不把 loop 本身当作问题
-明确说明本文并不认为 iterative loop 是架构缺陷。observe → infer → act → observe 本身是合理甚至不可避免的闭环决策结构。
-
-问题将在下一节出现：随着 Agent 能力扩张，越来越多原本属于 execution runtime 的状态和职责开始被依附到这条 context loop 上。
-
-1.4 Transition to the Architectural Problem
-
-P8 — 从认知连续性扩展到执行连续性
-最初 context 主要用于维持：
-
-task history
-recent observations
-reasoning-relevant state
-
-但复杂 Agent 系统逐渐还需要处理：
-
-running tasks
-tool lifecycle
-subagents
-permissions
-cancellation
-resource ownership
-results
-
-这里开始出现一个核心问题：
-
-哪些状态真正属于 LLM 的短期认知上下文，哪些状态应该由独立的 execution runtime 管理？
-## 2. From Decision Role to Runtime Role
-2.1 Agent as a Decision / Coordination Role
-
-P1 — 回归 Agent 的基础定义
-将 Agent 重新放回 RL / control loop 的抽象中：Agent 根据 observation 形成 decision，并输出 action。这里的 Agent 是一个 decision / coordination role，而不是某个具体框架里的对象、类或模块集合。
-
-核心关系：
-
+```text
 Environment ── observation ──→ Agent
 Environment ←──── action ───── Agent
+```
 
-P2 — LLM 只是 Agent 的一种实现机制
-在 LLM Agent 中，决策机制由模型推理完成，但 Agent 并不等于 LLM 本体。LLM 需要依赖外部维护的短期上下文，才能在多轮交互中保持连续性。
+Agent 可以决定下一步做什么、选择哪个工具、是否委派任务，以及如何解释结果。这些决策需要了解环境提供的能力，却不要求 Agent 本身承担这些能力的全部运行管理。
 
-2.2 The LLM Loop as the Decision Mechanism
+这一点不改变第一章的 loop 模型。上下文继续支持认知连续性，LLM 继续完成推理；接下来需要讨论的是，这个决策单元在软件结构中应当承担多大的职责。
 
-P3 — Loop 的内部结构
-LLM Agent 的核心 loop 可以表示为：
+### 2.2 决策环之外的 Environment
 
-Short-term Context ↔ LLM
+从当前 Agent 的局部视角看，工具实现、shell、文件系统、网络、数据库、外部存储、runtime 和其他 Agent 都属于 Environment。Figure 1 中的 Env 也包含 OS 式的管理职责，例如执行调度、资源管理、消息传递和权限检查。
 
-其中 context 是 LLM 唯一能够直接访问的动态短期记忆；模型参数则构成其长期、参数化记忆。
+Tool calling 是 action–observation 交互的一种工程表达。模型需要知道能力的用途、输入以及结果含义；函数绑定、请求执行、任务状态与结果交付则可以由环境中的独立组件管理。
 
-P4 — Context 的作用范围
-Context 保存当前推理所需的信息，例如近期 observation、用户输入、模型先前输出以及必要的任务历史。它并不是完整系统状态，而是对外界状态的选择性、短期表示。
+Subagent 也可以这样理解：它是当前 Agent 可以请求其工作的另一个执行单元，内部可能有自己的上下文与 LLM 调用。委派关系可以形成任务层级，但不要求被委派者成为当前 Agent 的内部组件。谁拥有这次执行、权限如何传递、取消如何传播，都可以由 runtime 显式维护。
 
-P5 — ReAct / loop 本身没有问题
-这种 iterative context–LLM loop 是自然且有效的。observe → infer → act → observe 本身不是本文批评对象；相反，它是 LLM Agent 最基本、最合理的决策结构。
+Environment 是相对当前决策主体划出的边界。其中可以有多个程序与管理层次，无须把所有功能放进同一个 Kernel。
 
-2.3 Everything Else Belongs to the Environment
+### 2.3 从决策支持扩展到执行管理
 
-P6 — Environment 的范围
-从单个 Agent 的局部视角看，除 decision loop 以外的部分都属于 Environment，包括：
+当一个 Agent 系统需要完成更复杂的工作时，仅有模型调用与上下文更新还不够。系统还需要跟踪运行中的任务、安排子任务、处理等待与重试、检查权限、传播取消，以及收集执行结果。
 
-tools
-shell
-filesystem
-network
-users
-databases
-external storage
-runtime
-other agents / subagents
+这些需求会推动 Agent 周围的 harness 承担越来越多运行时职责。这里的 harness 指组织模型调用、工具交互和任务运行的外围软件。它可以包含良好的模块划分；职责扩展本身并不意味着每一步管理都由模型推理完成。
 
-Agent 不需要知道这些机制内部如何实现。
+不过，当这些机制主要围绕 Agent 会话或其激活环组织时，仍需要回答：哪些状态属于本次推理的上下文，哪些状态应当独立于它存在？哪些组件只是被 Agent 使用，哪些组件必须依附于该 Agent 才能运行？
 
-P7 — Tool 只是 action–observation 的一种实现
-Agent 只产生 action。Environment 接收 action、发生状态变化，并返回 observation。所谓 tool calling 只是这种交互的一种工程编码方式。
+例如，“任务正在运行”可以是一条模型可见的观测，但实际执行记录应由系统维护。工具描述进入上下文，也不意味着工具实现及其生命周期需要归上下文管理模块所有。信息关系、调用关系与管理关系需要分别设计。
 
-因此 Agent 层不需要区分 tool 到底是函数、RPC、shell command、容器还是其他程序。
+### 2.4 具体参照：Codex 与 DeepSeek Harness
 
-P8 — Subagent 同样属于 Environment
-对于当前 Agent，所谓 subagent 只是 Environment 中可能被某个 action 激活、随后产生 observation 的外部行为。它是否由另一个 LLM、线程、进程或远程服务实现，不属于 Agent 局部抽象的问题。
+下面以两个具体系统说明这些职责如何被组织。资料核对日期为 2026-09-17；讨论依据其公开文档，不将产品中的 Agent 定义直接等同于本文的最小决策单元。
 
-2.4 Role Expansion in Modern Agent Systems
+#### Codex：围绕会话组织显式运行协议
 
-P9 — 从决策 loop 到执行管理
-随着 Agent 系统复杂化，原本只负责 decision 的 Agent 开始承担越来越多与执行相关的职责，例如：
+Codex App Server 以 Thread、Turn、Item 表达交互：Thread 容纳会话，Turn 对应一次用户请求及随后的工作，Item 表达消息、命令执行和工具调用等输入输出。协议提供开始、完成等事件，并通过带有 thread、turn、item 标识的请求处理命令审批。这些状态与交互由软件协议明确表达。[Codex App Server 文档](https://learn.chatgpt.com/docs/app-server)
 
-task tracking
-subtask scheduling
-retry
-permission handling
-cancellation
-lifecycle management
-result aggregation
+在上下文侧，Codex 的 Skill 采用渐进加载：先提供名称与描述，使用时再读取完整指令。这是第一章所说的上下文选择与拼装的具体例子；Skill 包中的脚本实际执行，则属于另一个职责。[Skill 文档](https://learn.chatgpt.com/docs/build-skills)
 
-这些职责不再只是“如何决定下一步行动”，而开始涉及整个执行系统如何运行。
+按本文模型理解，Codex 已经将部分运行管理放在模型之外，不能用“所有执行状态都靠 LLM 记忆维护”来描述它。这里值得进一步讨论的是其公开协议围绕会话及会话内工作展开的组织方式：如果把普通程序、协调器和不同决策方式放在同一系统中，是否还可以使用更一般的执行实体来组织它们？这是本文提出的设计问题，并非上述文档已经给出的结论。
 
-P10 — Operational state 渗入 context loop
-为了维持这些职责，越来越多 execution state 被重新编码进 Agent 的短期 context 或绑定在 Agent loop 周围。
+#### DeepSeek Harness：通过插件拆分外围能力
 
-例如：
+DeepSeek Harness 将模型、工具、Skill、会话、存储、沙箱、loop、调度和界面都作为可组合插件。Cordis 内核管理插件的挂载、卸载和依赖，插件通过服务与事件协作；其 Code mode 还允许模型生成代码，组织多步工具操作。[DeepSeek Harness 官方介绍](https://deepseek.com/harness/en/)
 
-which task is running
-which subtask has completed
-what failed
-what should be retried
-what permissions remain
+这种设计已经把“围绕 Agent 的能力”拆成可替换的软件组件。尤其是 loop 和调度本身也可替换，说明不能仅从 Agent harness 这个名称推断它的内部必然是一个不可分割的 Agent 对象。项目当前仍标为 developer preview，这里的讨论限于其公开设计。[官方仓库](https://github.com/deepseek-ai/deepseek-harness)
 
-于是 context 不再仅仅承担认知连续性，也开始间接承担执行连续性。
+从本文的视角看，还可以继续区分两种抽象：插件表达软件能力如何安装、依赖与组合，执行实体表达一次工作如何获得身份、权限、生命周期与结果。插件的挂载生命周期与一次任务的执行生命周期不是同一个问题。两者可以配合，插件化本身也不排斥 process-like 的运行模型。
 
-2.5 The Architectural Question
+#### 由具体系统回到架构问题
 
-P11 — 问题不是 Agent loop，而是角色膨胀
-本文并不认为 Agent loop 应该被消除，也不认为现有架构“错误”。
+这两个例子表明，将执行管理放在模型之外已经有具体的工程实践。本文要讨论的进一步选择，是能否为 LLM-backed program、普通程序与协调器提供共同的执行语义，使 Agent 可以作为其中一个决策组件存在。
 
-真正的问题是：
+Codex 的会话协议、DeepSeek Harness 的插件组合与 SemShell 探索的逻辑 Process 处于不同的抽象层次。比较的重点是各自用什么对象表达什么关系，而不是仅凭是否采用 Process 这个名称判断优劣。
 
-Agent 是否应该同时承担 decision role 和 execution runtime role？
+### 2.5 核心问题：Agent 应承担多少运行时职责？
 
-P12 — 引出后文
-如果将 decision / coordination 与 execution management 分离，那么 Agent 可以继续保持简单的：
+需要重新划分的是 decision role 与 execution runtime role。Agent 可以观察任务状态、提出执行请求并参与协调，但身份、有效权限、所有权、等待关系和终态结果，应当有独立于模型上下文的管理主体。
 
+独立构造不要求独立部署。同一进程内的组件也可以有清晰的状态归属和接口；同步调用同样可以保持组件独立性。任务之间仍可存在父子关系，只是由系统维护这种关系，而非依赖 Agent 反复推理来维持。
+
+这一划分也允许把可按既定规则推进的工作移出激活环。Agent 暂时没有新决策时，环境仍可以运行任务、收集结果与处理消息。异步执行由此成为组件独立性的一个结果。
+
+## 3. 将决策与执行管理分离
+
+### 3.1 保留 Agent 的决策与协调角色
+
+Agent 继续保持基本的闭环结构：
+
+```text
 observation → decision → action
+```
 
-而 identity、lifecycle、authority、cancellation、execution state 等可以由独立 runtime 管理。
+其内部仍可采用 ReAct、规划或其他推理策略。上下文管理与 LLM 调用继续构成决策核心，外部能力则通过明确的接口提供。
 
-这一节只提出问题，不提前宣称 process-centric 模型“更正确”。后文再讨论一种更规则、更显式的 runtime abstraction 是否更适合承载这些职责。
+Agent 可以调用协调程序，也可以被协调程序调用。确定性程序可以把某一步语义判断交给 LLM，LLM-backed program 也可以将一组已确定的工作交给普通程序推进。系统的执行结构不必预设某个 Agent 永远位于最上层。
 
-## 3.
+### 3.2 区分认知状态与运行状态
+
+短期上下文承担模型本次推理所需的认知状态，执行层维护运行中的事实与关系：
+
+| 认知状态（Cognitive state） | 运行状态（Operational state） |
+| --- | --- |
+| 近期观测与相关历史 | 运行实例及其生命周期 |
+| 指令、Skill 与工作材料 | 有效权限与资源访问规则 |
+| 任务状态的模型可见表示 | 所有权、等待与取消关系 |
+| 支持下一步判断的结果摘要 | 已提交的完成状态与结果 |
+
+LLM 可以观察、推理和使用右侧的状态，但上下文不应成为它们的唯一事实来源。上下文被裁剪，或一次模型调用结束，都不应改变任务是否仍在运行、具有什么权限以及是否已经完成。
+
+### 3.3 为独立组件提供统一执行语义
+
+不同程序内部行为可以完全不同：有的调用 LLM，有的执行确定性计算，有的协调其他程序，有的提供面向人的交互。但当它们进入运行状态时，都可能需要身份、输入输出、生命周期、权限、取消和结果等管理语义。
+
+统一执行层为这些关系提供共同的表达方式。它统一的是程序如何被识别、启动、约束和结束；程序的功能及决策方式仍由各自实现。
+
+权限也可在这一层统一组织。系统通过白名单、权限分级或显式授权集合等策略，判断某个执行主体能否对目标资源实施指定操作。Agent 可以提出请求，实际授予的权限由系统维护；LLM、规则程序和面向人的程序使用同一套检查原则。
+
+描述一项能力、发现一项能力和获准执行它，应当有各自明确的含义。这使权限管理成为共同的系统机制，而不依赖模型是否记住了完整的权限说明。
+
+### 3.4 用 Event / Action 表达执行边界
+
+独立程序与 runtime 可以通过统一接口交互：
+
+```text
+Event → 程序处理 → Action
+```
+
+Event 表达输入或状态变化，Action 表达程序请求的下一步操作，包括启动、等待、发送、调用资源、取消、退出和失败等。Tool calling 可以作为其中一种交互形式，而不必决定整个 runtime 的组织方式。
+
+程序处理一次事件不必调用一次 LLM。普通逻辑可以处理确定的状态转换；需要推理时，程序再组织上下文并调用模型。runtime 事件与模型可见观测之间仍有选择与转换的过程。
+
+提交请求后，执行可以独立推进。等待期间无需持续激活模型，结果可以保存或排队，再交给程序处理。具体的创建、等待和完成顺序由执行协议规定，后文再用案例展开。
+
+### 3.5 Runtime 仍属于 Environment
+
+上述划分保持了 Figure 1 的局部模型：Agent 发出 action，Environment 处理请求，并提供后续 observation。runtime 本身就是环境的一部分。
+
+runtime 根据既定规则进行准入、调度、跟踪、授权、取消与结果报告。协调程序可以管理分发、规则化重试和结果收集；需要语义判断或目标调整时，再调用合适的 Agent。
+
+因此，policy 与 mechanism 的划分要落实到具体步骤。例如，按既定次数重试和失败后重新选择方法可以由不同组件承担，收集结果与解释结果之间的冲突也可以分开。环境中既有管理机制，也可以有承担决策的其他程序，无须将所有协调策略放入 Kernel。
+
+### 3.6 为什么选择 Process-like 模型
+
+当这些共同的执行需求被明确后，Process 就成为一个自然的候选抽象。传统系统已用它表达一次运行的身份、生命周期、权限边界与完成状态；本文借用这些结构性质，为独立程序提供统一的管理对象。
+
+逻辑 Process 可以与具体后端解耦，不必等同于一个 Linux PID。不同运行实例可以具有不同权限和所有者，同时使用相同的执行接口。执行实体的类型平等，与任务中的父子关系并不冲突。
+
+这一模型的价值在于状态明确、生命周期清晰、权限关系可解释，以及组合结构容易检查。它不预先保证更快或更经济，也不是组件独立性的唯一实现方式。
+
+### 3.7 引出 SemShell
+
+由此可以提出一个具体实验问题：如果将 LLM-backed software、普通程序、协调器和 Operator 放入同一个 process-like runtime，并让它们共享统一的 execution semantics，会形成怎样的软件结构？
+
+这里的 Operator 是程序承担的决策与协调角色。它可以由 LLM-backed program、规则程序或面向人的程序实现；改变这一角色的实现，不应要求下游程序同时改变执行模型。
+
+SemShell 在后续章节作为这一问题的 executable reference design 出场。接下来需要通过具体模型与案例检验：身份、权限、所有权和生命周期能否在 LLM 之外得到一致管理，不同决策方式又能否在同一执行结构中替换。

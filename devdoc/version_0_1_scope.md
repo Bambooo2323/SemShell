@@ -1,5 +1,12 @@
 # Version 0.1 Scope: Architecture Proof
 
+> Historical design context. Current guarantees are defined in
+> [docs/semantics.md](../docs/semantics.md), with final evidence in the
+> [design-edition validation record](../docs/design-edition-validation.md).
+> The pre-removal Stage 3 implementation is recoverable from Git tag
+> `complete-reference-20260915`; older contracts remain in ancestor history.
+> Proposals and completion criteria below do not add active API guarantees.
+
 ## 1. Release purpose
 
 Version `0.1` is an executable architecture argument, not a complete CLI

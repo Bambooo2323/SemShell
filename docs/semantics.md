@@ -1,7 +1,7 @@
 # SemShell Core and Resource-Bridge Semantics
 
-This document is the public normative summary for the version 0.1 core and the
-minimal resource-bridge extension. Implementations may add diagnostics but
+This document is the public normative summary for the active design edition
+and its in-memory resource proof. Implementations may add diagnostics but
 must preserve these rules.
 
 ## Core entities
@@ -45,8 +45,9 @@ deep-freezes the JSON-like input. These authenticated fields are not Action
 fields.
 
 The Kernel rejects unknown bindings, unsupported operations, missing exact
-Authority, malformed input, and exhausted bridge capacity before calling Host
-bridge code. One Process may have at most one outstanding invocation. A
+Authority, input that cannot be frozen as JSON-like data, and exhausted bridge
+capacity before calling Host bridge code. Operation-specific validation, including
+portable read_text path validation, takes place inside the admitted bridge. One Process may have at most one outstanding invocation. A
 successful admission puts it in WAITING until exactly one
 `ResourceCompleted` or `ResourceRejected` continuation wins.
 
@@ -62,9 +63,8 @@ Host paths, content, result payloads, bridge objects, or raw exceptions.
 The minimal `read_text` contract accepts a portable relative path with `/`
 separators and ASCII `[A-Za-z0-9._-]+` segments. Absolute paths, backslashes,
 colons, empty, `.`, and `..` segments are invalid. Results are bounded UTF-8
-text. The local proof also resolves an existing candidate below a fixed root;
-it assumes a trusted temporary tree without concurrent adversarial symlink or
-junction mutation.
+text. The active proof uses only a deterministic in-memory bridge. Filesystem
+path resolution and containment are outside the active scope.
 
 ## Ownership and waiting
 
@@ -141,34 +141,14 @@ Multiple providers may advertise one capability, but an ambiguous resolution
 without an exact provider is rejected. The design edition has no live Catalog
 unregistration operation.
 
-## External control
+## Host administration
 
-The Host Control protocol has session/request identity and exactly one terminal
-reply per admitted request. Request interruption and transport disconnect do
-not imply Process cancellation or rollback of committed Kernel effects.
-
-Control sessions are not Processes. Normal Operator execution uses Event/Action;
-Host Control is limited to administration, observation, bootstrap, and tests.
-Trusted Host bootstrap selects the initial Policy, Catalog, root Operator, and
-any console binding. Remote authentication is outside version 0.1.
-
-The local Control CLI maintains one session and allocates monotonically named
-RequestIds after successful command parsing. Each admitted command produces one
-terminal ControlReply and audit record. Parser failures are adapter outcomes,
-consume no RequestId, and have no Kernel effect. `ListProcesses` is a read-only
-external operation returning deterministic immutable Process snapshots.
-
-The CLI cannot submit `SendMessage`: a ControlSession has no PID from which
-authentic Process IPC could originate. Console input instead targets one
-previously bound shell Process, and Process-to-Process IPC remains an Action.
-
-The remaining external mutation requiring explicit unscoped administration
-permission is cancellation: `control.process.cancel`. The trusted local CLI
-bootstrap receives this permission. An ordinary Process may cancel itself or an attached descendant;
-cancelling an unrelated Process requires exact
-`Permission("process.cancel", str(target_pid))` authority.
-Every accepted cancellation cascades through the selected target's attached
-descendants; neither guest nor Control callers select a cancellation mode.
+Trusted bootstrap selects the Policy, Catalog, root Operator, and any console
+binding. The small `HostAdmin` facade exposes root lifecycle administration
+without creating a Process identity or an IPC source PID. An ordinary Process
+may cancel itself or an attached descendant; cancelling an unrelated Process
+requires exact `Permission("process.cancel", str(target_pid))` authority.
+Every accepted cancellation cascades through the target's attached descendants.
 
 ## Role neutrality
 
