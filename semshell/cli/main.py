@@ -16,6 +16,7 @@ from semshell.examples import (
     run_demo,
     run_extended_demo,
 )
+from semshell.examples.delegation_demo import run_delegation_demo
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     demo = commands.add_parser("demo", help="run the flattened Process proof")
     selection = demo.add_mutually_exclusive_group(required=True)
     selection.add_argument("--operator", choices=("human", "rule", "llm"))
-    selection.add_argument("--scenario", choices=("extended",))
+    selection.add_argument("--scenario", choices=("extended", "delegation"))
     return parser
 
 
@@ -45,7 +46,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     arguments = build_parser().parse_args(argv)
     if arguments.command == "demo":
-        if arguments.scenario == "extended":
+        if arguments.scenario == "delegation":
+            output = asyncio.run(run_delegation_demo())
+        elif arguments.scenario == "extended":
             output = asyncio.run(_run_extended())
         else:
             operator = cast(OperatorKind, arguments.operator)

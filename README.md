@@ -73,6 +73,26 @@ The Operator chooses Actions; the Kernel authenticates identity, admits work,
 and owns cleanup. HostAdmin supplies trusted root lifecycle administration.
 See [the evidence and review record](docs/design-edition-validation.md).
 
+## Delegated-authority conversation
+
+```powershell
+.\.venv\Scripts\python.exe -m semshell.cli.main demo --scenario delegation
+```
+
+A ConsoleBridge supplies a dialogue to an ordinary UserShell Process. Its
+low-authority `llm1` starts two concurrent text tools and requests a separate
+worker with permission to read one in-memory project report. UserShell creates
+`llm2` under its own existing authority and relays the completed result.
+
+The offline models deliberately attempt three forbidden operations: llm1 reads
+the restricted report, llm1 tries to spawn a higher-authority child, and llm2
+reads a different resource. The JSON report includes Kernel denial evidence,
+ownership, effective permissions, and observed concurrent work. UserShell's
+approval is a fixed allowlist policy, not an interactive human approval prompt.
+
+See [the scenario and extension guide](docs/delegation-demo.md). No API key or
+external resources are needed.
+
 ## Optional OpenAI boundary proof
 
 `OpenAIResponsesBackend` is an optional reference adapter showing that model

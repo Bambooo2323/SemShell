@@ -14,6 +14,7 @@ def test_guest_abi_does_not_import_control_operations() -> None:
         *sorted((root / "semshell" / "shells").glob("*.py")),
         root / "semshell" / "examples" / "architecture_demo.py",
         root / "semshell" / "examples" / "extended_demo.py",
+        root / "semshell" / "examples" / "delegation_demo.py",
         root / "semshell" / "examples" / "resource_demo.py",
     )
     forbidden_roots = ("semshell.control", "semshell.kernel.operations")
