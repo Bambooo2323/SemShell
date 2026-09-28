@@ -35,7 +35,10 @@ def project_permission(permission: Permission) -> dict[str, str | None]:
 def project_authority(authority: Authority) -> list[dict[str, str | None]]:
     return [
         project_permission(permission)
-        for permission in sorted(authority.permissions)
+        for permission in sorted(
+            authority.permissions,
+            key=lambda item: (item.capability, item.scope is not None, item.scope or ""),
+        )
     ]
 
 

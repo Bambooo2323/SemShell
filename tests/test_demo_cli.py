@@ -9,6 +9,8 @@ import pytest
 
 from semshell.cli.main import main
 from semshell.examples import UnsupportedReportValue, project_public_value
+from semshell.examples.reporting import project_authority
+from semshell.security import Authority, Permission
 
 
 def run_cli(arguments: tuple[str, ...], capsys: pytest.CaptureFixture[str]) -> Any:
@@ -67,3 +69,15 @@ def test_extended_report_closes_identity_authority_and_lifecycle_evidence(
 def test_report_projection_rejects_arbitrary_python_objects() -> None:
     with pytest.raises(UnsupportedReportValue, match="unsupported report value"):
         project_public_value(object())
+
+
+def test_authority_report_preserves_scoped_and_unscoped_permissions() -> None:
+    authority = Authority.of(
+        Permission("read", scope) for scope in ("workspace", None, "")
+    )
+
+    assert project_authority(authority) == [
+        {"capability": "read", "scope": None},
+        {"capability": "read", "scope": ""},
+        {"capability": "read", "scope": "workspace"},
+    ]

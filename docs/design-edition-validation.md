@@ -4,6 +4,38 @@ Date: 2026-09-15. Stage 6 documentation and executable gates are ready for revie
 Independent reader sign-off remains pending. No release commit, release tag,
 remote publication, or independent review is claimed by this record.
 
+## Maintenance review — 2026-09-23
+
+The sections dated 2026-09-15 below retain their historical measurements.
+The current checklist is [devdoc/TODO.md](../devdoc/TODO.md); the previous
+roadmap is preserved as [historical TODO](../devdoc/TODO-history.md).
+
+This review corrected shallow metadata freezing in image, capability, and
+resource descriptors, and an Authority report sorting failure when a capability
+has both unscoped and string-scoped permissions. Eleven added regression cases
+failed before the fixes and pass after them. Nested metadata now uses immutable
+copies; changing the original containers cannot change the registered definitions.
+
+Validation used the existing Python 3.13.5 environment, without installing
+dependencies or calling a live model API:
+
+| Check | Result |
+| --- | --- |
+| Full pytest suite | 124 passed |
+| Ruff, package and tests | Passed |
+| Default strict mypy, excluding the optional adapter | 43 source files passed |
+| Full strict mypy, including the installed optional adapter | 44 source files passed |
+| `pip check` | No broken requirements found |
+| Five separate CLI runs: human, rule, llm, extended, delegation | Valid JSON; extended identity, denial, cancellation and late-result evidence matched expectations |
+
+The existing environment includes OpenAI SDK 3.3.1; its tests use a fake client.
+The current source tree contains 44 package Python files and 13 test modules.
+Python 3.11/3.12 compatibility and a freshly created SDK-free environment were
+not re-tested in this review. The earlier default-environment record below is
+historical evidence, not a claim that those checks were repeated today.
+Independent reader sign-off, the fourth Operator scenario, and publication
+remain open; this maintenance review does not close those gates.
+
 ## Reproduce
 
 Follow [README](../README.md) for Python 3.11+ setup, the three primary Operator
@@ -70,10 +102,18 @@ approval artifacts and partial grants, live Catalog unregistration, and explicit
 reaping. Production execution, transports, persistence, and containment remain
 outside this repository's implementation scope.
 
-The pre-removal checkpoint is Git tag `complete-reference-20260915`, branch
-`complete-reference`, commit `73c133d7a55bfec349708a276b8f91fb3011844a`.
+The pre-removal checkpoint is commit
+`73c133d7a55bfec349708a276b8f91fb3011844a`. Historical plans named Git tag
+`complete-reference-20260915` and branch `complete-reference`; neither ref is
+present in the local checkout reviewed on 2026-09-23. Their remote availability
+was not checked. Use the verified commit directly for local inspection:
+
+```powershell
+git show 73c133d7a55bfec349708a276b8f91fb3011844a:semshell/control/gateway.py
+```
+
 It preserves Control and filesystem code with the Stage 3 contract. Earlier API
-contracts are in its ancestors; the tag is not a snapshot of every old API.
+contracts are in its ancestors; the checkpoint is not a snapshot of every old API.
 
 ## Reader review and freeze status
 

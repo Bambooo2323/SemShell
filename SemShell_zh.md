@@ -318,82 +318,295 @@ Agent Host 可以向模型说明可用能力与当前权限，以帮助它规划
 
 SemShell 在后续章节作为这一问题的 executable reference design 出场。具体的软件定义、运行请求、Process、权限规则与执行案例，将用于检验本章提出的职责划分和共同契约。
 
-## 4. SemShell：从软件定义到一次受管理的执行（大纲）
+## 4. SemShell：从软件定义到一次受管理的执行
 
-本章以当前代码为依据，沿着“实现程序 → 注册软件 → 请求运行 → 组合执行”的路径，展示第三章的共同契约如何落实。以已有 Echo / Coordinator 示例贯穿正文，新增软件的写法在相应位置展开；具体片段与运行输出留待正文补充。
+第三章提出了共同执行契约，本章用 SemShell 的参考实现说明它如何运作。讨论沿着一份软件进入系统的过程展开：实现行为、注册定义、请求运行，再与其他程序组合。已有的 Echo / Coordinator 演示提供完整执行案例，一个简短的文本转换程序则展示新增软件需要填写哪些部分。
 
 ### 4.1 当前已经搭建了什么
 
-- 定位：可运行的参考执行框架，已经提供逻辑身份、事件处理、权限准入、所有权、等待、取消与结果管理；应用侧以演示程序为主。
-- 简述边界：软件实现行为，Catalog 保存定义，Kernel 管理运行，受信任的启动代码负责装配；Agent Host 可以作为普通程序接入。
-- 展示四个概念：`ProcessProgram` 是行为契约，`ProcessImage` 是软件定义，`ProcessSpec` 是本次请求，Process 是准入后的运行实例。逻辑 Process 不等同于 OS 进程。
+SemShell 当前提供的是一个可运行的参考执行框架。软件实现具体行为，Catalog 保存软件定义，Kernel 维护运行身份、权限准入、消息、所有权、等待、取消与结果；受信任的 Host 启动代码负责把这些组件装配起来。应用侧主要由演示程序组成，用来检查第三章提出的边界是否能够落实为代码。
 
-代码依据：[程序接口](./semshell/software/program.py)、[软件定义与请求](./semshell/software/image.py)、[运行状态与结果](./semshell/kernel/process.py)。
+这里先区分四个对象：
+
+| 对象 | 表达什么 | 在 Echo 示例中的含义 |
+| --- | --- | --- |
+| `ProcessProgram` | 程序处理事件并返回行动的行为契约 | `EchoProgram` 实现收到输入后返回结果的行为 |
+| `ProcessImage` | 带版本的软件定义，包含实例工厂与能力声明 | `demo.echo@1` 指向一份可以构造 Echo 程序的定义 |
+| `ProcessSpec` | 本次运行请求，包含软件选择、输入与请求权限 | 请求执行 `demo.echo`，输入为 `"alpha"` |
+| Process | 准入后的一次运行，拥有 PID、状态、权限与结果 | 某次 Echo 执行，与其他 Echo 执行各有身份 |
+
+因此，同一份 Image 可以产生多个 Process。输入不同、所有者不同或请求权限不同，都是运行请求之间的差异，无须为每次执行重新定义软件。`ProcessImage` 中的 Image 指逻辑软件定义，当前实现并不要求它是容器镜像。[软件定义与请求](./semshell/software/image.py)
+
+这些 Process 在当前 Python 实现中共享解释器，由异步运行机制推进；逻辑 PID 不等同于操作系统 PID。Kernel 管理的是共同执行语义，生产环境中的进程隔离、容器执行与持久化属于另外的实现工作。后文涉及权限时，也只把当前实现作为受控接口的授权证据，不将其解释为对任意 Python 代码的安全隔离。[运行状态与结果](./semshell/kernel/process.py)、[安全边界](./docs/security-model.md)
 
 ### 4.2 新增软件：实现程序行为
 
-- 从 `EchoProgram` 展示最小路径：收到 `Started`，读取输入，返回 `Exit(result)`。
-- 说明 `handle(context, event) -> Action` 与 `stop(reason)`：一次激活处理一个事件、返回一个 Action；程序可以保存私有状态，并提供取消清理逻辑。
-- 用一个简单文本处理程序示意新增软件需要填写的部分。区分运行侧的 `ProcessContext` 与第一章的 LLM Context；PID、生命周期记录和终态发布由 runtime 管理。
+最小程序可以只处理启动事件。现有 `EchoProgram` 收到 `Started` 后读取 `context.input`，返回 `Exit(context.input)`，把原输入作为本次执行的结果。它不自行分配 PID，也不直接修改运行状态；`Exit` 交给 Kernel 后，才由 Kernel 决定并发布终态。[Echo 实现](./semshell/examples/architecture_demo.py)
 
-拟用片段：最小程序实现，突出输入校验、结果与必要的失败处理。
+程序遵循 `handle(context, event) -> ProcessAction` 契约：一次激活处理一个 Event，返回一个 Action。Kernel 不会同时再次激活同一个 Process。多步程序可以把当前阶段保存在实例的私有状态中，待下一个事件到来后继续；这些私有状态与 Kernel 维护的运行记录各有用途。另一个接口 `stop(reason)` 用于有时间边界的尽力取消清理，程序可以在其中释放自己管理的资源。[程序接口](./semshell/software/program.py)、[激活语义](./docs/semantics.md#activation)
 
-代码依据：[ProcessProgram](./semshell/software/program.py)、[EchoProgram](./semshell/examples/architecture_demo.py)。
+例如，新增一个把文本转换为大写的程序，可以写成：
+
+```python
+from semshell.kernel import (
+    Exit, Fail, ProcessAction, ProcessContext, ProcessEvent, Started,
+)
+
+
+class UppercaseProgram:
+    async def handle(
+        self, context: ProcessContext, event: ProcessEvent
+    ) -> ProcessAction:
+        if not isinstance(event, Started):
+            return Fail("unsupported event")
+        if not isinstance(context.input, str):
+            return Fail("input must be a string")
+        return Exit(context.input.upper())
+
+    async def stop(self, reason: str) -> None:
+        pass
+```
+
+这段程序明确检查输入，并用 `Fail` 表达失败。若处理函数抛出异常，Kernel 也会将其转换为结构化的失败结果。这里没有需要清理的外部资源，所以 `stop` 为空。实现满足协议即可，无须继承专用的 Agent 或 Tool 基类。
+
+`ProcessContext` 是 Kernel 为当前激活提供的运行信息，包括 PID、所有者、Principal、有效 Authority 与输入。它不同于第一章的 LLM Context：前者描述本次执行，后者是模型本次推理可见的材料。使用 LLM 的程序可以从运行信息与事件中选择内容组织模型输入，但这种组织方式仍属于程序行为。
 
 ### 4.3 注册与发现：让系统知道这份软件
 
-- 将实现包装为 `ProcessImage`，声明 ID、版本、实例工厂及能力，通过 `ProcessCatalog.register()` 注册。注册定义与创建运行实例是不同操作。
-- 展示精确镜像引用与 capability 两种选择方式；同一能力存在多个提供者时需要明确选择，Catalog 不自行猜测。
-- 程序通过 `DiscoverImages` 获取不含执行工厂的描述信息。发现能力、把描述提供给模型与实际获准运行，分别属于不同环节。
+有了行为实现，还需要把它登记为可选择的软件。接着上一节的代码，受信任的装配代码可以创建 Catalog 并注册一个 Image：
 
-拟用片段：新软件的注册代码，以及 `ProcessSpec(image=...)` / `ProcessSpec(capability=...)` 两种请求。
+```python
+from semshell.software.catalog import ProcessCatalog
+from semshell.software.image import CapabilitySpec, ProcessImage, ProcessSpec
 
-代码依据：[ProcessImage / CapabilitySpec](./semshell/software/image.py)、[ProcessCatalog](./semshell/software/catalog.py)。
+catalog = ProcessCatalog()
+catalog.register(
+    ProcessImage(
+        image_id="article.uppercase",
+        version="1",
+        factory=UppercaseProgram,
+        capabilities=(
+            CapabilitySpec("text.uppercase", "Convert text to uppercase"),
+        ),
+    )
+)
+
+exact_request = ProcessSpec(image="article.uppercase@1", input="hello")
+capability_request = ProcessSpec(capability="text.uppercase", input="hello")
+```
+
+这里的 factory 在准入时构造程序实例；注册只保存定义，不会执行文本转换。两个 `ProcessSpec` 展示不同选择方式：前者指定精确软件版本，后者要求 Catalog 解析提供 `text.uppercase` 能力的软件。当前 Catalog 中只有一个提供者，所以两者选择同一 Image；它们仍是两个独立的运行请求。
+
+Capability 描述软件对外提供的语义接口，可以带有说明、输入输出 schema 等元数据。多个 Image 可以提供同一能力，此时调用方需要指定精确的 `provider`，或直接使用 Image 引用；Catalog 会拒绝含糊选择，不会自行推断“最好”的实现。各版本独立注册，重复的精确引用会被拒绝，新版本的注册也不会改变已经运行的 Process。[Catalog 实现](./semshell/software/catalog.py)
+
+运行中的程序通过返回 `DiscoverImages()` 请求发现软件，再接收 `ImagesDiscovered` 事件。事件中的描述信息不包含实例工厂，因而不会把 Host 构造程序的 callable 交给调用者。发现也不代表获准执行：程序可以先看见能力，再提出请求，实际准入仍需检查权限。
+
+对 LLM 程序而言，发现后还有一步工作：选择哪些描述、以什么形式放进模型上下文。Catalog 提供元数据，程序负责组织输入，Kernel 负责执行请求的准入。这三个环节不能仅凭“模型看到了一个工具名称”合并为一次操作。[Image 描述信息](./semshell/software/image.py)、[LLMShell 的上下文组织](./semshell/shells/llm.py)
 
 ### 4.4 准入与启动：从请求形成运行实例
 
-- 区分受信任启动代码创建根实例，与运行中的程序返回 `Spawn` 请求创建子实例。
-- 展示准入路径：解析软件定义、检查执行 ACL 与请求权限、通过工厂构造程序、分配 PID、建立运行记录并投递 `Started`。
-- 结合一次允许与一次拒绝说明权限：当前使用精确 capability/scope 权限集合，检查调用者、系统策略与镜像限制；权限请求需要完整获准，不会静默缩减。软件定义中的最低权限要求也须满足。
+运行请求有两个入口。受信任的 Host 启动代码可以创建根 Process；运行中的程序则返回 `Spawn`，请求创建由自己拥有的子 Process。前者负责建立执行环境的入口，后者在已有运行身份与权限范围内组合工作。
 
-拟用图：`ProcessImage + ProcessSpec → admission → Process → Started`。明确 Capability 描述与 Permission 授权的不同含义。
+下面的代码与 4.2、4.3 的代码按顺序放在同一个 Python 文件中，可以从项目环境运行。它通过 `HostAdmin` 启动根实例，打印 `HELLO`，最后关闭 Kernel：
 
-代码依据：[Kernel 准入](./semshell/kernel/kernel.py)、[默认权限策略](./semshell/security/policy.py)、[权限测试](./tests/test_authority_policy.py)。
+```python
+import asyncio
+
+from semshell.host.admin import HostAdmin
+from semshell.kernel import ProcessKernel
+from semshell.security import Authority, Principal
+
+
+async def main() -> None:
+    admin = HostAdmin(ProcessKernel(catalog))
+    await admin.start()
+    try:
+        pid = await admin.spawn(
+            exact_request,
+            principal=Principal.parse("human:article"),
+            authority_ceiling=Authority.empty(),
+        )
+        result = await admin.wait(pid)
+        print(result.result)
+    finally:
+        await admin.stop()
+
+
+asyncio.run(main())
+```
+
+`HostAdmin` 是受信任的生命周期管理接口，没有 SemShell PID，也不能作为 Process 消息的发送者。普通程序不通过这个接口创建工作，而是返回 Action，让 Kernel 从当前激活中确定请求来源。[HostAdmin](./semshell/host/admin.py)
+
+一次成功创建的主要路径如下：
+
+```mermaid
+flowchart LR
+    S["ProcessSpec<br/>软件选择、输入、请求权限"] --> R["Catalog 解析 ProcessImage"]
+    R --> A["准入检查<br/>执行 ACL、请求与 Authority"]
+    A --> F["工厂构造程序实例"]
+    F --> P["分配 PID<br/>建立运行与所有权记录"]
+    P --> E["投递 Started"]
+```
+
+准入失败不会分配 PID，也不会发布一个可运行的 Process。批量 `Spawn` 会在分配 PID、发布记录前完成整批请求的准备与检查。`Started` 则表示程序可以开始处理本次输入，后续能否成功仍由程序行为与运行结果决定。[准入语义](./docs/semantics.md#spawn-and-authority)
+
+权限检查需要区分三个概念。Principal 标识授权主体，例如上面的 `human:article`；Image 的执行 ACL 限制哪些主体可以运行这份软件；Authority 则是本次 Process 持有的操作权限。Capability 的“提供文本转换能力”属于软件描述，`Permission(capability, scope)` 的“允许对指定范围执行操作”属于授权，两者用途不同。
+
+当前默认策略使用精确的 Permission 集合。子进程请求的 Authority 必须在父进程有效权限内，同时满足系统与 Image 的上限，以及 Image 的最低权限要求。请求权限默认是空集合，不会因为创建了子进程就自动复制父进程的全部权限。如果请求不能被完整授予，准入会被拒绝，不会静默缩减权限后继续运行。[默认权限策略](./semshell/security/policy.py)
+
+例如，令 `P = Permission("workspace.read_text", "demo.workspace")`。在执行 ACL、系统与 Image 限制均允许的前提下：
+
+| 父进程的有效权限 | 子进程请求 | 准入结果 |
+| --- | --- | --- |
+| 包含 `P` | `{P}` | 可以授予该权限并创建子进程 |
+| 空集合 | `{P}` | 拒绝，父进程没有可委派的权限 |
+
+这里的 scope 是精确标识，不隐含路径层级或通配符。把另一个 scope 写进请求，也不会自动得到对它的访问权。上面的文本转换程序不需要资源权限，因而可以在空 Authority 下运行；读取资源的程序则需要相应授权。权限检查发生在执行边界，不依赖模型是否遵循提示词中的权限说明。[权限测试](./tests/test_authority_policy.py)
 
 ### 4.5 组合软件：创建、等待与完成
 
-- 用现有 `CoordinatorProgram` 贯穿一次 fan-out / fan-in：创建两个 Echo 实例，显式等待，再组合结果。
-- 完整展示 `Spawn → Spawned → Wait → ChildrenCompleted → Exit`，标明哪些步骤由程序决定，哪些由 Kernel 推进。
-- 在正常路径之后讨论子任务失败与取消：协调器决定业务处理方式，runtime 维护所有权、清理与终态规则。现有 Echo 聚合示例是简化的正常路径，不代表通用失败处理已经完成。
+有了运行实例，下一步是让程序组合其他程序。现有 `CoordinatorProgram` 接收一组输入，为每项输入创建 Echo，等待它们结束，再汇总结果。其 `handle` 实现如下；这里省略了所在模块的导入和 `stop` 接口：
 
-拟用证据：Process 树、最终结果与各实例状态。以现有 Echo 示例提供可执行证据，第二、三章的“测试程序 + LLM 分析程序”仍作为概念场景。
+```python
+async def handle(
+    self, context: ProcessContext, event: ProcessEvent
+) -> ProcessAction:
+    if isinstance(event, Started):
+        if not isinstance(context.input, (list, tuple)):
+            raise TypeError("coordinator input must be a list or tuple")
+        return Spawn(
+            tuple(
+                ProcessSpec(capability="demo.echo", input=value)
+                for value in context.input
+            )
+        )
+    if isinstance(event, Spawned):
+        return Wait(event.pids)
+    if isinstance(event, ChildrenCompleted):
+        return Exit(tuple(result.result for result in event.results))
+    raise RuntimeError(
+        f"unsupported Coordinator event: {type(event).__name__}"
+    )
+```
 
-代码依据：[Coordinator 与 demo](./semshell/examples/architecture_demo.py)、[生命周期语义](./docs/semantics.md)、[生命周期测试](./tests/test_kernel_lifecycle.py)。
+这个程序决定拆分方式与结果组合方式。Kernel 接受创建请求后分配子进程身份，通过 `Spawned` 返回 PID；协调器随后显式返回 `Wait`。当目标都已进入终态，Kernel 提供 `ChildrenCompleted`，协调器才解释结果并提交自己的 `Exit`。[完整演示实现](./semshell/examples/architecture_demo.py)
+
+```text
+Coordinator                         Kernel
+    │                                  │
+    ├─ Spawn(Echo alpha, Echo beta) ───→│ 准入并创建子进程
+    │←──────── Spawned(pids) ───────────┤
+    ├─ Wait(pids) ─────────────────────→│ 维护等待关系
+    │                                  │ 两个 Echo 分别结束
+    │←──── ChildrenCompleted(results) ──┤
+    └─ Exit(("alpha", "beta")) ────────→│ 提交协调器的终态结果
+```
+
+创建与等待因此是两个动作。所有 guest 创建的子进程都附属于一个 owner，但 owner 可以在创建之后继续处理其他逻辑，再决定等待哪些子进程。当前 `Wait` 只能等待直接拥有的子进程，且必须等显式集合中的所有目标结束；若目标在 `Wait` 前已经结束，Kernel 使用保留的结果满足等待，不要求程序恰好赶上完成通知。返回结果按 PID 排序。[所有权与等待](./docs/semantics.md#ownership-and-waiting)
+
+在本章下一节的主演示中，Operator 创建 Coordinator，Coordinator 再创建两个 Echo。一次新 Kernel 中的结果可整理为：
+
+| PID | 软件 | owner PID | 终态 | 结果的 JSON 表示 |
+| --- | --- | --- | --- | --- |
+| 1 | 所选 Operator | 无 | `EXITED` | `["alpha", "beta"]` |
+| 2 | `demo.coordinator@1` | 1 | `EXITED` | `["alpha", "beta"]` |
+| 3 | `demo.echo@1` | 2 | `EXITED` | `"alpha"` |
+| 4 | `demo.echo@1` | 2 | `EXITED` | `"beta"` |
+
+这组 PID 属于本次演示；一般程序应使用 `Spawned` 返回的身份，不应预设具体数字。表中展示的是软件选择、所有权与结果可以共同被观察，并不表示 Kernel 理解了“回声工具”或“协调器”这些角色。
+
+正常路径之外，还需要明确失败由谁处理。`ChildrenCompleted` 中包含各子进程的状态、结果和错误，并不保证它们全部成功。上述简化协调器只提取 `result`，没有实现通用失败处理；实际程序应检查状态，再决定返回部分结果、重试或失败。重试可以创建新的运行实例，其策略属于协调程序。
+
+生命周期责任则由 Kernel 落实。父进程仍有活动子进程时，正常 `Exit` 会被拒绝；异常失败与取消会进入清理流程，子进程先于 owner 完成清理。每个已准入 Process 只发布一个终态结果，迟到完成不能覆盖既定终态。等待表达同步条件，所有权决定清理范围，这两种关系在同一棵执行树中仍需分别理解。[取消与完成语义](./docs/semantics.md#cancellation-and-completion)、[生命周期测试](./tests/test_kernel_lifecycle.py)
+
+第二、三章使用的“测试程序 + LLM 分析程序”仍是概念场景；这里的 Echo 组合提供了可执行的最小证据。它验证创建、等待与结果组合的契约，尚不替具体应用完成测试报告解释或业务失败处理。
 
 ### 4.6 同一契约下的 LLM 程序与 Operator
 
-- 对照普通程序与 `LLMShell`：后者在事件处理中组织模型输入、调用 backend、解析输出，仍返回普通 Action。
-- 展示 Human / Rule / LLM 三种 Operator 使用同一组下游软件的例子；替换的是决策实现，Kernel 不增加角色分支。
-- 解释证据范围：当前 demo 的 human 路径接收预置任务，LLM 路径使用 scripted backend；相同的是下游结构与终态值，根 Operator 镜像不同。
+普通文本程序直接计算结果，LLM 程序则可以在处理事件时组织上下文、调用模型 backend，再将模型输出解析成 Action。两者交给 Kernel 的边界相同，差异位于程序内部。
 
-拟用证据：三条 demo 命令及精简输出，支持“运行契约可替换”的论点。
+当前 `LLMShell` 收到 `Started` 后先请求发现软件；收到 `ImagesDiscovered` 后，把任务、Image 引用和能力名称组织为模型输入，再调用 `SemanticBackend`。backend 返回文本，由 `action_from_data` 解析为结构化行动，随后交给 Kernel 处理。模型 SDK 的对象不进入 Kernel 的执行契约。[LLMShell](./semshell/shells/llm.py)、[行动解析](./semshell/shells/codec.py)
 
-代码依据：[LLMShell](./semshell/shells/llm.py)、[Operator 实现](./semshell/shells/base.py)、[可替换性测试](./tests/test_operator_demo.py)。
+在这个最小实现中，收到 `Spawned` 后返回 `Wait`、收到子任务结果后结束等步骤由普通逻辑完成，并不再次调用模型。这与第三章的区分一致：事件处理提供推进执行的机会，模型只在程序选择的步骤参与判断。更复杂的 Agent Host 可以在同一接口内实现自己的上下文管理与调用策略。
+
+仓库用三种 Operator 运行同一个任务。在完成 [README 中的环境安装](./README.md#setup) 后，从项目根目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m semshell.cli.main demo --operator human
+.\.venv\Scripts\python.exe -m semshell.cli.main demo --operator rule
+.\.venv\Scripts\python.exe -m semshell.cli.main demo --operator llm
+```
+
+三次输出中的关键结果如下，完整 JSON 还包含运行树与权限决策记录：
+
+| Operator | 根 Image | Process 数量 | 最终 `result` |
+| --- | --- | --- | --- |
+| Human | `demo.human-shell@1` | 4 | `["alpha", "beta"]` |
+| Rule | `demo.rule-shell@1` | 4 | `["alpha", "beta"]` |
+| LLM | `demo.llm-shell@1` | 4 | `["alpha", "beta"]` |
+
+三个 Operator 都通过发现、创建、等待和完成的共同契约，驱动同一组 Coordinator 与 Echo 软件。替换根 Image 后，下游所有权结构、程序与终态值保持一致，Kernel 不增加 Human、Rule 或 LLM 专用的运行分支。[可替换性与角色边界测试](./tests/test_operator_demo.py)
+
+这份证据的范围也需要准确理解。human 路径接收预置的 `OperatorTask`，没有在这三条命令中实现交互终端；llm 路径使用离线的 scripted backend，预先给定行动输出。它们验证不同决策实现可以接入同一执行契约，不比较真人、规则和真实模型的判断质量，也不保证任意替换程序都会产生相同结果。
+
+Host CLI 在这里负责装配与展示。任务进入根 Process 后，由 Operator 返回结构化行动；Coordinator 随后也会决定自己的子任务。决策可以分布在普通程序中，不要求所有行动都经过一个位于顶层的 LLM。
 
 ### 4.7 接入资源：程序之外的另一条扩展路径
 
-- 用 `WorkspaceReaderProgram` 展示 `InvokeResource → ResourceCompleted / ResourceRejected`，说明独立程序如何使用被动资源接口。
-- Host 在 Kernel 构造前装配资源绑定、操作与权限映射；Kernel 依据当前执行身份检查请求，再调用 bridge。
-- 对照两种扩展：需要独立生命周期的工作实现为程序，资源能力通过 bridge 提供。当前演示使用内存资源，不把它写成已完成的本地文件系统集成。
+软件组合解决了独立运行实例之间的协作。读取材料等操作还需要访问运行环境中的资源。SemShell 为这类访问提供被动的 ResourceBridge：程序提出资源请求，由 Kernel 检查当前执行身份与权限，再调用受信任 Host 提供的实现。
 
-拟用证据：相同读取程序在有权限与无权限时的结果，尤其是拒绝请求未调用 bridge。
+`WorkspaceReaderProgram` 展示了这条路径。它从启动输入中取得 binding ID 与相对路径，返回 `InvokeResource(binding_id, "read_text", {"path": path})`；收到 `ResourceCompleted` 后提交读取结果，收到 `ResourceRejected` 后用 `Exit({"error": ...})` 提交业务错误。Kernel 拒绝请求或已准入的 bridge 执行失败，均可产生 `ResourceRejected`。这个示例处理该事件后仍正常结束为 `EXITED`；程序也可以选择 `Fail`，将操作错误转为整个 Process 的失败。读取程序有自己的 PID 与生命周期，bridge 则是被调用的 Host 资源接口。[读取程序与装配](./semshell/examples/resource_demo.py)
 
-代码依据：[资源示例](./semshell/examples/resource_demo.py)、[资源注册](./semshell/resources/registry.py)、[资源测试](./tests/test_kernel_resources.py)。
+资源必须先由 Host 装配。Host 在 Kernel 启动前建立 `ResourceRegistry`，把 binding ID、操作到 Permission 的映射以及 bridge 实例绑定起来。例如，`demo.workspace` 的 `read_text` 操作要求 `Permission("workspace.read_text", "demo.workspace")`。guest 不能凭一个名字自行注册或替换该绑定。[资源注册](./semshell/resources/registry.py)
+
+调用时，Kernel 从当前 Process 记录中取得 PID、Principal 与有效 Authority，分配调用 ID，检查资源、操作、权限和容量，并把 JSON-like 输入冻结为不可变数据。缺少权限的请求在进入 bridge 前就会被拒绝；只有获准后，bridge 才负责操作本身的参数校验与访问。调用结果通过后续事件回到程序，程序无须取得 Host 实现对象。[资源调用语义](./docs/semantics.md#host-resource-invocation)
+
+扩展演示可以验证允许、拒绝与取消边界：
+
+```powershell
+.\.venv\Scripts\python.exe -m semshell.cli.main demo --scenario extended
+```
+
+其中，资源访问与生命周期结果包含以下证据：
+
+| 输出字段 | 值 | 所说明的边界 |
+| --- | --- | --- |
+| `resource.success.result`、`resource.success.bridge_invocations` | `"hello"`、`1` | 获准的读取调用 bridge 并返回内容 |
+| `resource.denied.bridge_invocations` | `0` | 缺少权限时没有调用 bridge |
+| `cancellation.owner_state`、`cancellation.child_state` | 均为 `CANCELLED` | 取消覆盖 owner 与附属子进程 |
+| `cancellation.child_result_publications` | `1` | 子进程只发布一个终态结果 |
+| `cancellation.late_outcome_suppressed` | `true` | 迟到的资源结果不能重新激活已取消的 Process |
+
+取消持有资源调用的 Process，不等于底层操作已经物理停止。当前契约先确定执行侧的取消与结果交付规则；即使 bridge 迟到返回，也不能改变终态。演示使用内存 bridge 和受控时序验证这些性质，没有访问本地项目文件，也不能据此推断已经实现了文件系统隔离。[扩展演示](./semshell/examples/extended_demo.py)、[资源测试](./tests/test_kernel_resources.py)
+
+更完整的委派演示把程序组合与资源授权放在同一个场景中：
+
+```powershell
+.\.venv\Scripts\python.exe -m semshell.cli.main demo --scenario delegation
+```
+
+Host 通过绑定的 ConsoleBridge 向 UserShell 提交对话。UserShell 创建空 Authority 的 `llm1`，后者启动两个文本工具，并请求读取受限报告。直接读取和自行创建更高权限子进程的尝试都会被拒绝。随后，`llm1` 向 UserShell 发送委派请求，UserShell 检查请求并使用自己已有的权限创建 `llm2`：
+
+```text
+UserShell                         [报告读取权限]
+├── llm1                          [空 Authority]
+│   ├── 文本工具：词数             [空 Authority]
+│   └── 文本工具：字符数           [空 Authority]
+└── llm2                          [报告读取权限]
+```
+
+`llm2` 与 `llm1` 协作，但由 UserShell 拥有。UserShell 等待 `llm2` 后把结果作为消息交给 `llm1`；`llm1` 没有直接等待兄弟进程，也没有因此获得报告读取权限。Kernel 为消息提供真实的来源 PID，应用程序负责请求关联与应答解释。协作关系、所有权与授权因而可以分别表达。
+
+这里的批准来自固定白名单策略，模型输出来自 scripted backend；演示中的越权尝试也是预先安排的验证步骤。UserShell 的批准不能制造自己没有的权限，Kernel 仍会独立执行准入检查。该示例验证的是授权范围内的委派与结果转交，并非通用交互审批系统。[委派场景与验证](./docs/delegation-demo.md)、[委派测试](./tests/test_delegation_demo.py)
+
+由此可以区分两种扩展方式：需要独立身份、权限与生命周期的工作实现为 ProcessProgram；需要供程序访问的 Host 资源则通过受控 bridge 接入。同一个应用可以同时使用两者，无须把每次资源操作都包装成新 Process。
 
 ### 4.8 已验证的边界与后续软件开发
 
-- 总结新增软件的实际改动范围：实现程序、声明镜像与能力、加入装配，再补充相应行为验证。使用现有执行契约时，无须为新软件给 Kernel 增加角色分支。
-- 列明当前范围：CLI 是 demo 入口；尚无通用安装或运行命令、依赖自动装配与通用 schema 校验。当前 LLMShell 也只将镜像引用和能力名称提供给模型，完整软件说明如何进入上下文仍可继续完善。
-- 回应前三章：程序行为可以不同，但身份、授权、生命周期与组合关系可以使用共同契约。参考实现提供可检查的语义证据；生产后端属于单独的实现工作。
+回到新增软件的问题，本章的文本转换程序只需要实现行为、声明 Image 与能力、加入 Catalog 装配，再由调用方提交 `ProcessSpec`。使用现有 Event / Action 契约时，不需要为它向 Kernel 增加新的软件角色分支。相应的输入、结果、失败与组合行为仍应由软件自己的验证覆盖；共同运行机制不会替应用证明业务正确性。
 
-写作收束：回到“新增一个软件需要实现什么，运行框架替它管理什么”，再讨论这一边界对 Agent Host 的意义。
+目前的示例也标出了后续开发的具体空间。CLI 仍是演示入口，没有通用安装或运行命令；`required_capabilities` 和 schema 等声明没有形成自动依赖装配与通用输入输出校验机制。新增软件需要明确装配，程序也仍需检查业务输入。当前 `LLMShell` 仅把 Image 引用和能力名称提供给模型，软件说明、参数 schema 与失败反馈如何进入更完整的决策流程，还需要在程序侧继续实现。
+
+参考实现已经提供可检查的运行证据：不同 Operator 可以驱动共同的软件组合，Kernel 维护身份、等待、所有权与唯一终态，资源请求在 Host 调用前接受权限检查。这些性质由具体演示和测试支撑，不构成性能提升、真实模型能力或生产可靠性的结论。操作系统隔离、持久化恢复与生产执行后端仍属于独立的实现范围。[参考实现与生产边界](./docs/reference-and-production.md)
+
+对于前三章讨论的 Agent Host，这一划分意味着它可以继续管理上下文、调用模型并决定如何协调工作，同时作为普通程序使用共同执行契约。程序决定要做什么、如何解释结果；运行框架维护哪次执行已获准、由谁拥有、何时结束以及留下什么结果。两者通过事件与行动衔接，使认知过程的延续与执行过程的管理各有明确的软件主体。

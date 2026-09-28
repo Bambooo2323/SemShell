@@ -75,6 +75,46 @@ def test_image_descriptor_contains_metadata_but_not_factory() -> None:
     assert not hasattr(descriptor, "factory")
 
 
+@pytest.mark.parametrize(
+    ("kind", "field_name"),
+    [
+        (kind, field_name)
+        for kind, fields in (
+            ("capability", ("input_schema", "output_schema", "estimated_cost")),
+            ("image", ("input_schema", "output_schema", "trust_metadata")),
+            ("descriptor", ("input_schema", "output_schema", "trust_metadata")),
+        )
+        for field_name in fields
+    ],
+)
+def test_catalog_metadata_is_recursively_immutable(kind: str, field_name: str) -> None:
+    source = {"properties": {"name": {"enum": ["original"]}}}
+    kwargs: dict[str, Any] = {field_name: source}
+    value: Any
+    if kind == "capability":
+        value = CapabilitySpec(name="demo", description="Demo", **kwargs)
+    elif kind == "image":
+        value = ProcessImage(
+            image_id="demo",
+            version="1",
+            factory=lambda: VersionProgram("1"),
+            **kwargs,
+        )
+    else:
+        value = ProcessImageDescriptor(image_id="demo", version="1", **kwargs)
+
+    source["properties"]["name"]["enum"].append("changed")
+    metadata = getattr(value, field_name)
+    assert metadata["properties"]["name"]["enum"] == ("original",)
+    with pytest.raises(TypeError):
+        metadata["properties"]["name"]["enum"] = ("changed",)
+    if kind == "image":
+        exposed = getattr(value.describe(), field_name)
+        with pytest.raises(TypeError):
+            exposed["properties"]["name"]["enum"] = ("changed",)
+        assert metadata["properties"]["name"]["enum"] == ("original",)
+
+
 @pytest.mark.asyncio
 async def test_live_registration_keeps_completed_versions_observable() -> None:
     catalog = ProcessCatalog()

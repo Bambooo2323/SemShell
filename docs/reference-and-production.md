@@ -383,7 +383,8 @@ and
 
 The former Control protocol, administration REPL, and local filesystem bridge
 were removed from the active design edition in Stage 4. Their complete
-implementation remains recoverable at Git tag `complete-reference-20260915`.
+implementation remains recoverable at commit
+`73c133d7a55bfec349708a276b8f91fb3011844a`.
 
 ### Remove from this repository's roadmap
 
@@ -399,8 +400,10 @@ Those are production-runtime concerns for the separate repository.
 
 ### Physical migration rule
 
-Stage 4 preserved the pre-removal Stage 3 tree at branch `complete-reference`
-and tag `complete-reference-20260915` (commit `73c133d`). This checkpoint includes
+The pre-removal Stage 3 tree is preserved at commit
+`73c133d7a55bfec349708a276b8f91fb3011844a`. The historical plan named branch
+`complete-reference` and tag `complete-reference-20260915`, but neither ref is
+present in the local checkout reviewed on 2026-09-23. This checkpoint includes
 the Control and filesystem implementations, with the reduced Stage 3 ABI.
 Earlier v0.1 behavior is available in its ancestor history. Historical code remains
 available through Git rather than an importable `archive/` package. Do not

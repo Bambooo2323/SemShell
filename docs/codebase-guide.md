@@ -19,8 +19,10 @@ branches.
 
 `HostAdmin` is a small trusted lifecycle facade. It has no PID and cannot
 originate Process IPC. The active CLI only bootstraps and renders the offline
-demonstrations. The former Control protocol and REPL are recoverable at Git tag
-`complete-reference-20260915`, but are not active APIs.
+demonstrations. The former Control protocol and REPL are recoverable at commit
+`73c133d7a55bfec349708a276b8f91fb3011844a`, but are not active APIs. See the
+[recovery record](design-edition-validation.md#retained-and-removed-scope) for
+the status of the historical branch and tag names.
 
 ## Source map
 
@@ -69,6 +71,9 @@ backend. Optional adapters are imported from their provider module directly.
 - `examples/architecture_demo.py` proves equivalent Operator fan-out/fan-in.
 - `examples/extended_demo.py` proves IPC provenance, authority denial,
   attached-tree cancellation, and late-result suppression.
+- `examples/delegation_demo.py` proves UserShell-mediated delegation within
+  existing Authority, concurrent text tools, and three rejected operations;
+  see the [scenario guide](delegation-demo.md).
 - `examples/reporting.py` projects only explicit demo reports to JSON.
 - `examples/resource_demo.py` uses a supplied resource bridge.
 - `cli/main.py` selects and renders only the offline demonstrations.

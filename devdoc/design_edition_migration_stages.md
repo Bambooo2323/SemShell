@@ -1,5 +1,12 @@
 # Design Edition Staged Migration Plan
 
+> Maintenance note (2026-09-23): stage records below describe their dated
+> working trees. Current work is tracked in [TODO.md](TODO.md); references to
+> its former numbered sections now refer to [TODO-history.md](TODO-history.md).
+> The historical branch/tag names are absent from this local checkout; commit
+> `73c133d7a55bfec349708a276b8f91fb3011844a` remains available. See the updated
+> [validation record](../docs/design-edition-validation.md).
+
 Date: 2026-09-10
 
 Status: migration execution record. Stages 1–5 are implemented. Stage 6

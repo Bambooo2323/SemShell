@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from semshell.security.authority import Authority
 from semshell.security.principal import Principal
+from semshell.values import freeze_public_value
 
 if TYPE_CHECKING:
     from semshell.software.program import ProcessProgram
@@ -30,14 +31,14 @@ class CapabilitySpec:
         if not self.name:
             raise ValueError("capability name must not be empty")
         object.__setattr__(
-            self, "input_schema", MappingProxyType(dict(self.input_schema))
+            self, "input_schema", freeze_public_value(self.input_schema)
         )
         object.__setattr__(
-            self, "output_schema", MappingProxyType(dict(self.output_schema))
+            self, "output_schema", freeze_public_value(self.output_schema)
         )
         object.__setattr__(self, "side_effects", tuple(self.side_effects))
         object.__setattr__(
-            self, "estimated_cost", MappingProxyType(dict(self.estimated_cost))
+            self, "estimated_cost", freeze_public_value(self.estimated_cost)
         )
 
 
@@ -76,13 +77,13 @@ class ProcessImage:
                 self, "execute_principals", frozenset(self.execute_principals)
             )
         object.__setattr__(
-            self, "trust_metadata", MappingProxyType(dict(self.trust_metadata))
+            self, "trust_metadata", freeze_public_value(self.trust_metadata)
         )
         object.__setattr__(
-            self, "input_schema", MappingProxyType(dict(self.input_schema))
+            self, "input_schema", freeze_public_value(self.input_schema)
         )
         object.__setattr__(
-            self, "output_schema", MappingProxyType(dict(self.output_schema))
+            self, "output_schema", freeze_public_value(self.output_schema)
         )
         object.__setattr__(
             self, "required_capabilities", tuple(self.required_capabilities)
@@ -137,13 +138,13 @@ class ProcessImageDescriptor:
                 self, "execute_principals", frozenset(self.execute_principals)
             )
         object.__setattr__(
-            self, "trust_metadata", MappingProxyType(dict(self.trust_metadata))
+            self, "trust_metadata", freeze_public_value(self.trust_metadata)
         )
         object.__setattr__(
-            self, "input_schema", MappingProxyType(dict(self.input_schema))
+            self, "input_schema", freeze_public_value(self.input_schema)
         )
         object.__setattr__(
-            self, "output_schema", MappingProxyType(dict(self.output_schema))
+            self, "output_schema", freeze_public_value(self.output_schema)
         )
         object.__setattr__(
             self, "required_capabilities", tuple(self.required_capabilities)

@@ -12,6 +12,7 @@ from typing import Any
 
 from semshell.security.authority import Authority, Permission
 from semshell.security.principal import Principal
+from semshell.values import freeze_public_value
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -64,7 +65,7 @@ class ResourceBindingDescriptor:
             raise ValueError("operation Permission scope must equal the binding ID")
         object.__setattr__(self, "operations", MappingProxyType(operations))
         object.__setattr__(
-            self, "metadata", MappingProxyType(dict(self.metadata))
+            self, "metadata", freeze_public_value(self.metadata)
         )
 
 

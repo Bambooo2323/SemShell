@@ -69,6 +69,18 @@ def test_descriptor_requires_binding_scoped_permissions() -> None:
         )
 
 
+def test_binding_descriptor_snapshots_nested_metadata() -> None:
+    metadata = {"labels": {"names": ["original"]}}
+    value = ResourceBindingDescriptor(
+        BINDING_ID, "workspace", {"read_text": READ_PERMISSION}, metadata
+    )
+    metadata["labels"]["names"].append("changed")
+
+    assert value.metadata["labels"]["names"] == ("original",)
+    with pytest.raises(TypeError):
+        value.metadata["labels"]["names"] = ("changed",)
+
+
 def test_registry_is_exact_immutable_and_deterministic() -> None:
     first = ResourceBinding(descriptor(), InMemoryResourceBridge({"a.txt": "a"}))
     second_id = ResourceBindingId("binding-2")
